@@ -1,0 +1,81 @@
+# Benchmark scores per upstream model — refreshed by scripts/fetch_benchmarks.py.
+# Runtime never fetches: toto_gateway/benchmarks.py reads this file only.
+asof: '2026-07-01'
+models:
+  anthropic/claude-sonnet-4.6:
+    code: 0.93
+    context_window: 1000000
+    general: 0.91
+    price_source: openrouter
+    price_usd_per_1k:
+      completion: 0.015
+      prompt: 0.003
+    reasoning: 0.9
+    source: seed
+  claude-sonnet-4-6:
+    code: 0.93
+    general: 0.91
+    reasoning: 0.9
+    source: seed
+  anthropic/claude-sonnet-5:
+    code: 0.95
+    context_window: 1000000
+    general: 0.94
+    price_source: openrouter
+    price_usd_per_1k:
+      completion: 0.01
+      prompt: 0.002
+    reasoning: 0.94
+    source: seed
+  gpt-4o:
+    code: 0.72
+    general: 0.78
+    reasoning: 0.7
+    source: seed
+  meta-llama/llama-3.3-70b-instruct:
+    code: 0.58
+    context_window: 131072
+    general: 0.68
+    price_source: openrouter
+    price_usd_per_1k:
+      completion: 0.00032
+      prompt: 0.0001
+    reasoning: 0.6
+    source: seed
+  qwen/qwen3-coder-flash:
+    code: 0.8
+    context_window: 1000000
+    general: 0.6
+    price_source: openrouter
+    price_usd_per_1k:
+      completion: 0.000975
+      prompt: 0.000195
+    reasoning: 0.55
+    source: seed
+  qwen2.5-coder-32b-instruct:
+    code: 0.74
+    general: 0.55
+    reasoning: 0.48
+    source: seed
+  # Scores DELIBERATELY OMITTED: these models are UNMEASURED. Hand-invented seed scores (0.80-0.85)
+  # made an expensive ($1.20/1M) frontier reasoning model the DEFAULT reasoning/general engine on
+  # the economy lane over the ~6x-cheaper OpenRouter models — a fabricated-data cost regression.
+  # With no scores, benchmarks.score() returns NEUTRAL (0.5), so the router won't auto-route to them
+  # (pricier + at-par), but the lane stays fully usable via explicit model pin or BYOK. Run
+  # scripts/fetch_benchmarks.py (or measure) to let Fireworks compete on evidence, not fiction.
+  accounts/fireworks/models/glm-5p2:
+    context_window: 131072
+    price_source: fireworks
+    # Fireworks size-tier floor: $1.20/1M in & out (top general-MoE tier, docs 2026-07-04).
+    price_usd_per_1k:
+      completion: 0.0012
+      prompt: 0.0012
+    source: seed
+  accounts/fireworks/models/deepseek-v4-pro:
+    context_window: 163840
+    price_source: fireworks
+    # Fireworks size-tier floor: $1.20/1M in & out (large Pro variant, NOT the V4-Flash rate). 2026-07-04.
+    price_usd_per_1k:
+      completion: 0.0012
+      prompt: 0.0012
+    source: seed

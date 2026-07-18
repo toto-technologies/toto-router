@@ -1,0 +1,94 @@
+# Live-demo catalog — real execution via OpenRouter (the real catalog.yaml is untouched).
+# The router still decides the TIER by content; both tiers run on OpenRouter, so answers are real.
+# Residency is honestly `cloud` for both — OpenRouter is cloud. The green in-perimeter story
+# returns with a real local box; here the economy tier is a cheap cloud model standing in.
+# Needs OPENROUTER_API_KEY in the environment.
+
+models:
+  # fake lanes kept for offline tests / safe fallback
+  - id: echo-local
+    lane: fake
+    endpoint: fake
+    residency_class: in_perimeter
+    price_usd_per_1k: { prompt: 0.0, completion: 0.0 }
+    context_window: 32768
+  - id: echo-cloud
+    lane: fake
+    endpoint: fake
+    residency_class: cloud
+    # Per-1k, matching catalog.yaml's row exactly (scale fixed 2026-07-14) — this fragment
+    # composes AFTER catalog.yaml and overrides by id, so a drifted copy here silently wins.
+    price_usd_per_1k: { prompt: 0.003, completion: 0.015 }
+    context_window: 200000
+
+  # economy tier — the router sends "local-appropriate" work here (grep, sql, classify, redact).
+  # A cheap coder model on OpenRouter. ~15x cheaper than the frontier tier → the cost story is real.
+  - id: or-qwen3-coder-flash
+    lane: economy
+    endpoint: openai
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    residency_class: cloud      # honest: OpenRouter is cloud, data leaves the perimeter
+    price_usd_per_1k: { prompt: 0.0002, completion: 0.00097 }
+    context_window: 32768
+    upstream_model: qwen/qwen3-coder-flash
+    # Emits tool calls as raw text ("<function=bash>…") instead of structured tool_calls via
+    # OpenRouter (verified live 2026-07-09) — fatal for a harness loop. Smart routes agentic
+    # (tools-bearing) traffic past it; plain chat still lands here.
+    tools: false
+
+  # voice-turn edge model — benchmarked 2026-07-05 (docs/benchmarks/2026-07-05-voice-model-bench.md):
+  # only edge model clearing the 90% mechanics bar (90/100 voice), 533ms p50 first-token, ~10x
+  # cheaper than or-sonnet-5. Companion voice turns via TOTO_GW_COMPANION_VOICE_MODEL=or-flash.
+  - id: or-gemini-2.5-flash
+    lane: economy
+    endpoint: openai
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.0003, completion: 0.0025 }
+    context_window: 1048576
+    upstream_model: google/gemini-2.5-flash
+    # Aborts the stream on a role:"tool" message via OpenRouter (verified 2026-07-08) — the wire
+    # textifies tool traffic here, and smart routing skips it for tools-bearing requests.
+    tools: false
+
+  # Fireworks lives in its own fragment (catalog.fireworks.yaml), not here — compose it on with
+  # TOTO_GW_CATALOG="catalog.openrouter.yaml,catalog.fireworks.yaml". Keeps this file about
+  # OpenRouter only; Fireworks models never sit inside the OpenRouter catalog.
+
+  # enrichment tier — a Haiku-class model for list-item enrichment (descriptions + routing
+  # metadata). Cheap, fast, reliably structured output.
+  - id: or-haiku-4.5
+    lane: economy
+    endpoint: openai
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.001, completion: 0.005, cache_write_multiplier: 1.25 } # Anthropic-family write premium
+    context_window: 200000
+    upstream_model: anthropic/claude-haiku-4.5
+
+  # frontier tier — hard reasoning (summarize filings, decompose a thesis). A strong model.
+  - id: or-sonnet-4.6
+    lane: frontier
+    endpoint: openai
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.003, completion: 0.015, cache_write_multiplier: 1.25 } # Anthropic-family write premium
+    context_window: 200000
+    upstream_model: anthropic/claude-sonnet-4.6
+
+  # frontier tier, next-gen — Sonnet 5. Newer AND cheaper than sonnet-4.6 (prompt 0.002 vs
+  # 0.003, completion 0.010 vs 0.015 per 1k, verified live via OpenRouter models endpoint
+  # 2026-07-02). Candidate default driver/orchestrator model — set TOTO_GW_DRIVER_MODEL=or-sonnet-5.
+  - id: or-sonnet-5
+    lane: frontier
+    endpoint: openai
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.002, completion: 0.010, cache_write_multiplier: 1.25 } # Anthropic-family write premium
+    context_window: 1000000
+    upstream_model: anthropic/claude-sonnet-5

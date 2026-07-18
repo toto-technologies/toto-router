@@ -1,0 +1,47 @@
+# Fireworks provider fragment — a self-contained catalog OVERLAY, not a standalone environment
+# catalog. Compose it onto a base with TOTO_GW_CATALOG="catalog.openrouter.yaml,catalog.fireworks.yaml"
+# (Catalog.load merges comma-separated files left-to-right, later files extend/override by id).
+# Keeping Fireworks in its own file means no provider's models live inside another provider's
+# catalog; adding a future provider is a new fragment, not an edit to an unrelated file.
+#
+# OpenAI-compatible, so it's pure catalog: endpoint=openai + base_url + api_key_env. Serverless is
+# cloud → residency_class is honestly `cloud`. Needs FIREWORKS_API_KEY (platform) or a per-user
+# BYOK key. upstream_model ids are verified against the live serverless catalog (2026-07); the
+# "economy" alias is aspirational — the account's serverless models are currently frontier-class,
+# not cheap small models. Pricing is seed / non-authoritative (re-benchmarked out-of-band).
+
+# Account-scoped models (fine-tunes like the docx editor on accounts/toto-tech) do NOT belong
+# here: this file is the shared platform offering, visible to every caller and billed to the
+# platform key. Fine-tunes reach callers through credential-scoped inventory discovery — save the
+# owning Fireworks key in Settings and the deployment appears in that scope's /v1/models only.
+
+models:
+  - id: fw-glm-5.2
+    lane: economy
+    endpoint: openai
+    base_url: https://api.fireworks.ai/inference/v1
+    api_key_env: FIREWORKS_API_KEY
+    residency_class: cloud      # honest: Fireworks serverless is cloud
+    # Real basis: Fireworks serverless size-tier schedule, docs.fireworks.ai/serverless/pricing
+    # (fetched 2026-07-04). GLM-5 is a large MoE; per-model $/tok for >176B isn't published, so
+    # this uses the top documented general-MoE tier (56.1–176B) = $1.20/1M in & out = $0.0012/1k,
+    # a FLOOR (a >176B model bills at or above this). Size tiers charge input=output. Reasoning
+    # model: it emits reasoning tokens, so effective $/answer runs well above the per-token rate.
+    price_usd_per_1k: { prompt: 0.0012, completion: 0.0012 }
+    context_window: 131072         # GLM-class serverless window (matches GLM-4.5 128K)
+    upstream_model: accounts/fireworks/models/glm-5p2
+
+  - id: fw-deepseek-v4-pro
+    lane: economy
+    endpoint: openai
+    base_url: https://api.fireworks.ai/inference/v1
+    api_key_env: FIREWORKS_API_KEY
+    residency_class: cloud
+    # Real basis: same size-tier schedule (docs.fireworks.ai/serverless/pricing, 2026-07-04).
+    # DeepSeek-V4-Pro is the large (>176B MoE, V3-lineage 671B-class) variant — the published
+    # DeepSeek-V4-Flash rate ($0.14/$0.28 per 1M) is the SMALL sibling and does not apply here.
+    # No per-model $/tok published for the Pro, so it also uses the top general-MoE tier =
+    # $1.20/1M in & out = $0.0012/1k, a FLOOR. Reasoning model: reasoning tokens inflate $/answer.
+    price_usd_per_1k: { prompt: 0.0012, completion: 0.0012 }
+    context_window: 163840         # matches real DeepSeek serverless window (160K)
+    upstream_model: accounts/fireworks/models/deepseek-v4-pro

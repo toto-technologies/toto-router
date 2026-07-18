@@ -1,0 +1,89 @@
+# toto-gateway model catalog — Phase 0 seed.
+#
+# Data-driven (context doc §9 guardrail #4): the incoming request's `model` field is resolved
+# against this list to pick a lane + upstream + price. Never hard-code "the smart model" in code.
+#
+# lane (cost/compute TIER): economy | frontier | fake
+#   economy  — the cheap pool; cheap-first work lands here (an on-prem box, or a cheap cloud model)
+#   frontier — the premium pool: a strong model, burst only when policy allows
+#   fake     — deterministic echo runner; never touches the network (dev / tests / offline demo)
+#
+# residency_class (data LOCATION, orthogonal to tier): in_perimeter (green) | cloud (indigo) —
+# this is what the provenance rail's data-residency dot reads. Present from request #1.
+
+models:
+  # --- Fake lane: runs anywhere, no secrets, no GPU. Powers the offline demo + tests. ---
+  - id: echo-local
+    lane: fake
+    endpoint: fake
+    residency_class: in_perimeter
+    price_usd_per_1k: { prompt: 0.0, completion: 0.0 }
+    context_window: 32768
+
+  - id: echo-cloud
+    lane: fake
+    endpoint: fake
+    residency_class: cloud
+    # Demo row priced like the cloud frontier entry (per-1k; scale fixed 2026-07-14 with it).
+    price_usd_per_1k: { prompt: 0.003, completion: 0.015 }
+    context_window: 200000
+
+  # --- Economy lane: the team's appliance. Enable by running mlx_lm.server on :8081. ---
+  - id: qwen2.5-coder-32b-mlx
+    lane: economy
+    endpoint: http://127.0.0.1:8081/v1
+    residency_class: in_perimeter
+    price_usd_per_1k: { prompt: 0.0, completion: 0.0 } # local marginal cost ~ electricity
+    context_window: 32768
+    upstream_model: qwen2.5-coder-32b-instruct
+
+  # --- Frontier lane: burst only when policy allows. Needs ANTHROPIC_API_KEY. ---
+  - id: claude-sonnet-4.6
+    lane: frontier
+    endpoint: anthropic
+    residency_class: cloud
+    # $3/$15 per 1M (platform.claude.com pricing) ÷ 1000 — this field is per 1k tokens.
+    # Scale fixed 2026-07-14: was stored as per-1M figures, overreporting cost 1000×.
+    # cache_write_multiplier: Anthropic charges 1.25x base input for a 5-min cache write.
+    price_usd_per_1k: { prompt: 0.003, completion: 0.015, cache_write_multiplier: 1.25 }
+    context_window: 200000
+    upstream_model: claude-sonnet-4-6
+
+  # --- OpenAI frontier: burst via OpenAI API. Needs OPENAI_API_KEY. ---
+  - id: gpt-4o
+    lane: frontier
+    endpoint: openai
+    residency_class: cloud
+    # $2.50/$10 per 1M ÷ 1000 — per-1k field. Scale fixed 2026-07-14 (was per-1M figures).
+    price_usd_per_1k: { prompt: 0.0025, completion: 0.010 }
+    context_window: 128000
+    upstream_model: gpt-4o
+
+  # --- OpenRouter: one rented provider among several (we are provider-agnostic, not pinned).
+  #     Any OpenAI-compatible host is just an entry: endpoint=openai + base_url + api_key_env.
+  #     The same pattern covers Together, Fireworks, Groq, a direct lab, etc.
+  #     Needs OPENROUTER_API_KEY. Governed as a frontier provider (pin the model; enforce ZDR
+  #     + training-opt-out at the OpenRouter account level). See Obsidian Toto/toto-openrouter/.
+  - id: or-sonnet-4.6
+    lane: frontier
+    endpoint: openai                       # reuses the OpenAI-compatible runner
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.003, completion: 0.015, cache_write_multiplier: 1.25 } # per-1k (scale fixed 2026-07-14); varies by routed model. write premium: Anthropic-family upstream
+    context_window: 200000
+    upstream_model: anthropic/claude-sonnet-4.6  # PIN a model for provenance (don't let OR route)
+
+  - id: or-sonnet-5                         # default driver/orchestrator model (config.py)
+    lane: frontier
+    endpoint: openai
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.002, completion: 0.010, cache_write_multiplier: 1.25 } # per-1k (scale fixed 2026-07-14); newer + cheaper than sonnet-4.6. write premium: Anthropic-family upstream
+    context_window: 1000000
+    upstream_model: anthropic/claude-sonnet-5
+
+  # --- Fireworks lives in its own fragment: catalog.fireworks.yaml. Enable it by composing that
+  #     file onto this one — TOTO_GW_CATALOG="catalog.yaml,catalog.fireworks.yaml" (Catalog.load
+  #     merges comma-separated files). Kept separate so no provider's models sit in another's file.

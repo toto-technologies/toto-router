@@ -1,0 +1,22 @@
+{
+  "name": "toto-control-surface",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev --port 5180",
+    "build": "vite build",
+    "build:oss": "node dev/make-oss-routes.mjs && VITE_EDITION=oss CONSOLE_ROUTES=src/routes-oss vite build",
+    "preview": "vite preview --port 5180",
+    "test": "node --test",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@sveltejs/adapter-static": "^3.0.10",
+    "@sveltejs/kit": "^2.69.0",
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "svelte": "^5.56.4",
+    "vite": "^8.1.2"
+  }
+}

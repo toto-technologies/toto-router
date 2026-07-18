@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+*.sqlite
+*.jsonl
+node_modules/
+control-surface/build/
+control-surface/.svelte-kit/
+control-surface/src/routes-oss/
+.DS_Store

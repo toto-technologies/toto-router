@@ -1,0 +1,29 @@
+# Label -> model bindings. The KEYS are the classifier's closed vocabulary: the LABEL_PROMPT
+# enumerates them, parse_label accepts only them. NVIDIA's 11 task types + toto's `redact`
+# (Q-NVD-1: merge). Deterministic: one label, one catalog entry id.
+#
+#   model: <catalog id>  — the binding; displaces the benchmark argmax at dispatch
+#   model: null          — label exists but routes via classify() (the fallback ladder)
+#   desc                 — one line, rendered into the classifier prompt verbatim
+#   category             — the EVIDENCE bucket (registry.py category) an UNBOUND label routes
+#                          benchmark-best on (B3): the most specific benchmark category that scores
+#                          this task type. Consulted only when model is null / unbound; default
+#                          reasoning. other/redact omit it (no task category — generic fallback).
+#
+# The `optimize` knob (quality/balanced/cost tie-buckets) applies ONLY when the fallback
+# path decides — a bound label is a fixed pick. redact/other stay unbound: redaction is
+# governed by data_policy/guard residency, never by a cloud binding.
+
+labels:
+  code_generation:  {model: or-qwen3-coder-flash,         desc: "write, complete, or debug code, SQL, regex, or scripts", category: coding}
+  open_qa:          {model: or-sonnet-4.6,        desc: "factual question answered from general knowledge", category: knowledge}
+  closed_qa:        {model: or-gemini-2.5-flash,           desc: "answer strictly from context provided in the task", category: long_context}
+  summarization:    {model: or-gemini-2.5-flash,           desc: "condense given text into a shorter form", category: instruction_following}
+  text_generation:  {model: or-sonnet-4.6,        desc: "compose original prose, essays, memos, or reports", category: writing}
+  rewrite:          {model: or-sonnet-4.6,        desc: "rephrase, reformat, or translate given text", category: instruction_following}
+  classification:   {model: or-qwen3-coder-flash,         desc: "assign categories, tags, or sentiment to inputs", category: reasoning}  # no direct public benchmark yet
+  extraction:       {model: or-qwen3-coder-flash,         desc: "pull structured fields or values out of text", category: reasoning}  # no direct public benchmark yet
+  brainstorming:    {model: or-sonnet-4.6,        desc: "open-ended idea generation or creative exploration", category: writing}
+  chatbot:          {model: or-gemini-2.5-flash,           desc: "conversational exchange, greetings, casual replies", category: conversation}
+  other:            {model: or-sonnet-4.6,      desc: "none of the above fits"}  # the GENERALIST: catch-all + classifier-failure landing spot; org-overridable in the console
+  redact:           {model: null,               desc: "involves sensitive data to remove, mask, or anonymize"}

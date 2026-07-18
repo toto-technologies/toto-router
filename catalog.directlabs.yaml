@@ -1,0 +1,352 @@
+# Direct-lab provider fragment — a self-contained catalog OVERLAY (like catalog.fireworks.yaml).
+# Compose it on with TOTO_GW_CATALOG="catalog.yaml,catalog.directlabs.yaml" (Catalog.load merges
+# comma-separated files left-to-right). One shared fragment for the direct labs (Mistral, xAI,
+# DeepSeek, Perplexity, MiniMax, Google, Alibaba/Qwen, Moonshot, Z.ai, OpenAI-extras,
+# Anthropic-extras) rather than a dozen near-empty files: no AGGREGATOR owns these
+# models, so nothing sits "inside another provider's file", and per-entry api_key_env keeps
+# enablement per-provider anyway — set the keys you have, the rest stay declared-but-idle
+# (same as gpt-4o in catalog.yaml without OPENAI_API_KEY).
+#
+# All entries are OpenAI-compatible: endpoint=openai + base_url + api_key_env, zero code.
+# Every price, context window, and capability below was verified against the provider's live
+# docs on 2026-07-14 (source URL noted per provider). Prices are USD per 1k tokens — providers
+# publish per 1M, so each number here is the published figure / 1000.
+
+models:
+  # --- Mistral (api.mistral.ai). Needs MISTRAL_API_KEY. ---
+  # Prices: mistral.ai/pricing/api; names/context/tools: docs.mistral.ai model cards (2026-07-14).
+
+  # Their frontier-class multimodal agentic/coding model (v26.04). $1.50/$7.50 per 1M, 256k ctx,
+  # native function calling.
+  - id: mistral-medium-3.5
+    lane: frontier
+    endpoint: openai
+    base_url: https://api.mistral.ai/v1
+    api_key_env: MISTRAL_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.0015, completion: 0.0075 }
+    context_window: 262144
+    upstream_model: mistral-medium-3-5-26-04
+
+  # Hybrid instruct+reasoning+coding small model (v26.03). $0.15/$0.60 per 1M, 256k ctx, tools.
+  - id: mistral-small-4
+    lane: economy
+    endpoint: openai
+    base_url: https://api.mistral.ai/v1
+    api_key_env: MISTRAL_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.00015, completion: 0.0006 }
+    context_window: 262144
+    upstream_model: mistral-small-2603
+
+  # --- xAI / Grok (api.x.ai). Needs XAI_API_KEY. ---
+  # Prices/context/ids: docs.x.ai/docs/models; tools + base_url: docs.x.ai function-calling
+  # guide (2026-07-14). xAI prices are TIERED: prompts ≥200k tokens bill ~2x the rates below —
+  # the Price model can't express tiers, so these are the <200k base rates (a FLOOR for
+  # long-context requests). Cached-input price is published per model → real read multipliers.
+
+  # Mainline model: $1.25/$2.50 per 1M (<200k), 1M ctx, cached input $0.20/1M → 0.16 read mult.
+  # Priced in the cheap pool (cheaper output than or-haiku-4.5) despite frontier-ish capability.
+  - id: grok-4.3
+    lane: economy
+    endpoint: openai
+    base_url: https://api.x.ai/v1
+    api_key_env: XAI_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.00125, completion: 0.0025, cache_read_multiplier: 0.16 }
+    context_window: 1000000
+    upstream_model: grok-4.3
+
+  # Their strongest model: $2/$6 per 1M (<200k), 500k ctx, cached input $0.50/1M → 0.25 read mult.
+  - id: grok-4.5
+    lane: frontier
+    endpoint: openai
+    base_url: https://api.x.ai/v1
+    api_key_env: XAI_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.002, completion: 0.006, cache_read_multiplier: 0.25 }
+    context_window: 500000
+    upstream_model: grok-4.5
+
+  # --- DeepSeek (api.deepseek.com). Needs DEEPSEEK_API_KEY. ---
+  # Prices/ids/context: api-docs.deepseek.com/quick_start/pricing (2026-07-14). Legacy ids
+  # deepseek-chat/deepseek-reasoner are deprecated 2026-07-24 — these are the replacement ids.
+  # Context caching is automatic; cache-hit input is priced separately → exact read multipliers.
+  # NOTE: direct DeepSeek v4-pro ($0.435/$0.87 per 1M) undercuts the fw-deepseek-v4-pro
+  # Fireworks floor ($1.20/$1.20) by ~2-3x — same model family, different host + key.
+
+  # Small/flash sibling: $0.14 in (miss) / $0.28 out per 1M; cache hit $0.0028/1M → 0.02 mult.
+  - id: deepseek-v4-flash
+    lane: economy
+    endpoint: openai
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.00014, completion: 0.00028, cache_read_multiplier: 0.02 }
+    context_window: 1000000
+    upstream_model: deepseek-v4-flash
+
+  # Large V3-lineage model: $0.435 in (miss) / $0.87 out per 1M; cache hit $0.003625/1M →
+  # 0.008333 mult. Reasoning model — reasoning tokens inflate effective $/answer.
+  - id: deepseek-v4-pro
+    lane: economy
+    endpoint: openai
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.000435, completion: 0.00087, cache_read_multiplier: 0.008333 }
+    context_window: 1000000
+    upstream_model: deepseek-v4-pro
+
+  # --- Perplexity (api.perplexity.ai). Needs PERPLEXITY_API_KEY. ---
+  # Prices: docs.perplexity.ai/getting-started/pricing; base_url: sonar quickstart (2026-07-14).
+  # These are SEARCH-GROUNDED answer models — the reason to route here at all. COST FLOOR:
+  # Perplexity bills a per-REQUEST search fee on top of tokens (sonar $5–12 per 1k requests,
+  # sonar-pro $6–14, by search context size) that the per-token Price model cannot express, so
+  # compute_cost_usd UNDERREPORTS by ~$0.005–0.014/request here. tools: false — no native
+  # function calling documented anywhere in the Sonar API docs (checked 2026-07-14).
+
+  # $1/$1 per 1M, 128k ctx.
+  - id: sonar
+    lane: economy
+    endpoint: openai
+    base_url: https://api.perplexity.ai
+    api_key_env: PERPLEXITY_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.001, completion: 0.001 }
+    context_window: 128000
+    upstream_model: sonar
+    tools: false
+
+  # $3/$15 per 1M, 128k ctx — frontier-priced deep search.
+  - id: sonar-pro
+    lane: frontier
+    endpoint: openai
+    base_url: https://api.perplexity.ai
+    api_key_env: PERPLEXITY_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.003, completion: 0.015 }
+    context_window: 128000
+    upstream_model: sonar-pro
+    tools: false
+
+  # --- MiniMax (api.minimax.io). Needs MINIMAX_API_KEY. ---
+  # Prices: platform.minimax.io/docs/guides/pricing-paygo; context/tools: official M3 release
+  # notes (minimax.io/blog/minimax-m3); OpenAI-compat base_url: platform OpenAI SDK docs
+  # (2026-07-14). M2.7 deliberately omitted: identical price, smaller window, superseded by M3.
+
+  # M3 (2026-06): 428B MoE, 1M ctx, tool calling, natively multimodal. Standard tier
+  # $0.30/$1.20 per 1M for prompts ≤512k; >512k bills 2x (tiering not expressible here — the
+  # rate below is a FLOOR past 512k). Cached read $0.06/1M → 0.2 mult. Interleaved-thinking
+  # reasoning model: reasoning tokens inflate effective $/answer.
+  - id: minimax-m3
+    lane: economy
+    endpoint: openai
+    base_url: https://api.minimax.io/v1
+    api_key_env: MINIMAX_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.0003, completion: 0.0012, cache_read_multiplier: 0.2 }
+    context_window: 1000000
+    upstream_model: MiniMax-M3
+
+  # --- Google direct (generativelanguage.googleapis.com OpenAI-compat). Needs GEMINI_API_KEY. ---
+  # Base URL: ai.google.dev/gemini-api/docs/openai (the documented OpenAI-compatibility endpoint;
+  # Google labels it BETA "while we extend feature support" — function calling, streaming, and
+  # structured output are all documented as supported, verified 2026-07-14). Prices:
+  # ai.google.dev/gemini-api/docs/pricing; context/tools: per-model pages (2026-07-14).
+  # Today Gemini only reaches us via OpenRouter (or-gemini-2.5-flash, tools:false there) — these
+  # rows are the direct path, and function calling works natively on Google's own endpoint.
+  # Cache multipliers are the published context-caching token price / input price; Google ALSO
+  # bills explicit-cache STORAGE per hour ($1.00/1M/h on these two), which the per-token Price
+  # model cannot express — a small underreport when explicit caches are used.
+
+  # Flagship: $1.50/$9.00 per 1M, 1,048,576 ctx, tools. Cached input $0.15/1M → 0.1 read mult.
+  - id: gemini-3.5-flash
+    lane: frontier
+    endpoint: openai
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+    api_key_env: GEMINI_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.0015, completion: 0.009, cache_read_multiplier: 0.1 }
+    context_window: 1048576
+    upstream_model: gemini-3.5-flash
+
+  # Small/cheap: $0.25/$1.50 per 1M (text; audio input bills higher — not expressible here),
+  # 1,048,576 ctx, tools. Cached input $0.025/1M → 0.1 read mult.
+  - id: gemini-3.1-flash-lite
+    lane: economy
+    endpoint: openai
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+    api_key_env: GEMINI_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.00025, completion: 0.0015, cache_read_multiplier: 0.1 }
+    context_window: 1048576
+    upstream_model: gemini-3.1-flash-lite
+
+  # --- Alibaba Qwen via DashScope INTERNATIONAL (Singapore). Needs DASHSCOPE_API_KEY. ---
+  # Base URL: dashscope-intl.aliyuncs.com/compatible-mode/v1 — the international endpoint per
+  # Alibaba's OpenAI Chat API Reference (alibabacloud.com/help/en/model-studio, 2026-07-14).
+  # NOT the mainland one (dashscope.aliyuncs.com): API keys are region-specific and an intl key
+  # only works here. Prices: alibabacloud.com/help/en/model-studio/model-pricing (Singapore
+  # tables). Cache: implicit caching is automatic and always on; cache hits bill 20% of input →
+  # 0.2 read mult (alibabacloud.com/help/en/model-studio/context-cache; implicit TTL is
+  # "indeterminate", so no cache_ttl_s). Tools: function calling supported on compatible-mode,
+  # but Alibaba's own compat doc says the tools parameter cannot be combined with stream=True —
+  # a real gap for streamed agentic turns on this endpoint.
+
+  # Flagship: $2.50/$7.50 per 1M, flat 0–1M ctx (no length tiers on Max).
+  - id: qwen3.7-max
+    lane: frontier
+    endpoint: openai
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    api_key_env: DASHSCOPE_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.0025, completion: 0.0075, cache_read_multiplier: 0.2 }
+    context_window: 1000000
+    upstream_model: qwen3.7-max
+
+  # Cheap tier: $0.25/$1.50 per 1M for prompts ≤256k; 256k–1M bills $1/$4 per 1M — tiering not
+  # expressible in Price, so these are the ≤256k base rates (a FLOOR for long-context requests).
+  - id: qwen3.6-flash
+    lane: economy
+    endpoint: openai
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    api_key_env: DASHSCOPE_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.00025, completion: 0.0015, cache_read_multiplier: 0.2 }
+    context_window: 1000000
+    upstream_model: qwen3.6-flash
+
+  # --- Moonshot / Kimi (api.moonshot.ai). Needs MOONSHOT_API_KEY. ---
+  # Base URL: api.moonshot.ai/v1 (platform.kimi.ai OpenAI-migration guide, 2026-07-14 — the docs
+  # site moved to platform.kimi.ai but the API host is still api.moonshot.ai). Prices/context:
+  # platform.kimi.ai/docs/pricing (per-model pages). Caching is automatic with a published
+  # cache-hit input price → exact read multipliers; no TTL published → no cache_ttl_s.
+  # OpenAI-compat gaps per their migration doc: tool_choice="required" is NOT supported (auto
+  # works — native tool calling is otherwise real), and temperature is clamped to [0, 1].
+
+  # Their recommended flagship (multimodal, thinking + non-thinking): $0.95/$4.00 per 1M,
+  # 262,144 ctx. Cache-hit input $0.16/1M → 0.1684 read mult.
+  - id: kimi-k2.6
+    lane: economy
+    endpoint: openai
+    base_url: https://api.moonshot.ai/v1
+    api_key_env: MOONSHOT_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.00095, completion: 0.004, cache_read_multiplier: 0.1684 }
+    context_window: 262144
+    upstream_model: kimi-k2.6
+
+  # Newest, coding/agentic specialist (no general k2.7 exists): $0.95/$4.00 per 1M, 262,144 ctx.
+  # Cache-hit input $0.19/1M → 0.2 read mult.
+  - id: kimi-k2.7-code
+    lane: economy
+    endpoint: openai
+    base_url: https://api.moonshot.ai/v1
+    api_key_env: MOONSHOT_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.00095, completion: 0.004, cache_read_multiplier: 0.2 }
+    context_window: 262144
+    upstream_model: kimi-k2.7-code
+
+  # --- Z.ai / Zhipu GLM (api.z.ai). Needs ZAI_API_KEY. ---
+  # Base URL: api.z.ai/api/paas/v4 — documented for use with the OpenAI SDK (docs.z.ai model
+  # pages, 2026-07-14). Prices: docs.z.ai/guides/overview/pricing; context/tools: per-model
+  # pages. Cached-input price published per model → exact read multipliers; no TTL published.
+
+  # Flagship: $1.40/$4.40 per 1M, 1M ctx, tools/MCP. Cached input $0.26/1M → 0.1857 read mult.
+  # NOTE: same family as fw-glm-5.2 ($1.20/$1.20 flat on Fireworks) — direct is cheaper on
+  # input-heavy cached traffic, Fireworks is far cheaper on output-heavy runs.
+  - id: glm-5.2
+    lane: economy
+    endpoint: openai
+    base_url: https://api.z.ai/api/paas/v4
+    api_key_env: ZAI_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.0014, completion: 0.0044, cache_read_multiplier: 0.1857 }
+    context_window: 1000000
+    upstream_model: glm-5.2
+
+  # Mid/cheap workhorse: $0.60/$2.20 per 1M, 200k ctx, tools. Cached $0.11/1M → 0.1833 read mult.
+  # (glm-4.7-flashx is cheaper still but its model page 404s — not verifiable, so not listed.)
+  - id: glm-4.7
+    lane: economy
+    endpoint: openai
+    base_url: https://api.z.ai/api/paas/v4
+    api_key_env: ZAI_API_KEY
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.0006, completion: 0.0022, cache_read_multiplier: 0.1833 }
+    context_window: 200000
+    upstream_model: glm-4.7
+
+  # --- OpenAI direct, beyond catalog.yaml's gpt-4o. Needs OPENAI_API_KEY (default host). ---
+  # Prices/specs: developers.openai.com/api/docs/pricing + per-model pages (2026-07-14). Both
+  # serve Chat Completions (v1/chat/completions) with function calling. Cached input is
+  # published per model ($0.50 and $0.10 per 1M) → exactly the 0.1 default read multiplier.
+
+  # Current flagship reasoning model: $5/$30 per 1M, 1,050,000 ctx, 128k out. TIERED: requests
+  # >272k input tokens bill 2x input / 1.5x output for the whole request — not expressible in
+  # Price, so these are the ≤272k base rates (a FLOOR for long-context requests).
+  - id: gpt-5.6-sol
+    lane: frontier
+    endpoint: openai
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.005, completion: 0.03 }
+    context_window: 1050000
+    upstream_model: gpt-5.6-sol
+
+  # Current small/cheap tier of the same family: $1/$6 per 1M, 1,050,000 ctx, 128k out.
+  # (gpt-5.4-nano is nominally cheaper but a legacy family — luna is the current one.)
+  - id: gpt-5.6-luna
+    lane: economy
+    endpoint: openai
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.001, completion: 0.006 }
+    context_window: 1050000
+    upstream_model: gpt-5.6-luna
+
+  # --- Anthropic direct, beyond catalog.yaml's claude-sonnet-4.6. Needs ANTHROPIC_API_KEY. ---
+  # endpoint=anthropic → the FrontierRunner (native Messages API), NOT the OpenAI-compat wire —
+  # same shape as catalog.yaml's claude-sonnet-4.6 row. Prices/ids/context:
+  # platform.claude.com/docs pricing + models overview (2026-07-14). Cache: 5-min write = 1.25x
+  # input, read = 0.1x (the Price defaults) — write premium set explicitly per house rule.
+  # NOTE: prices here are per-1k like the rest of this fragment; catalog.yaml's claude-sonnet-4.6
+  # row stores per-1M figures in the same field (marked "example pricing" there) — don't copy it.
+
+  # Sonnet 5 direct: $2/$10 per 1M, 1M ctx — the native-endpoint sibling of or-sonnet-5.
+  # Exists so the driver/companion defaults can run first-party instead of through OpenRouter
+  # (ToS §7(4) exposure — see provider-tos memory/lawyer list, 2026-07-14). Same price as the
+  # OR route; first-party cache mechanics.
+  - id: claude-sonnet-5
+    lane: frontier
+    endpoint: anthropic
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.002, completion: 0.010, cache_write_multiplier: 1.25 }
+    context_window: 1000000
+    upstream_model: claude-sonnet-5
+
+  # Current Opus: $5/$25 per 1M, 1M ctx, 128k out.
+  - id: claude-opus-4.8
+    lane: frontier
+    endpoint: anthropic
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.005, completion: 0.025, cache_write_multiplier: 1.25 }
+    context_window: 1000000
+    upstream_model: claude-opus-4-8
+
+  # Fastest current Claude: $1/$5 per 1M, 200k ctx, 64k out. Direct sibling of or-haiku-4.5
+  # (same price via OpenRouter, but this is the native endpoint + first-party cache mechanics).
+  - id: claude-haiku-4.5
+    lane: economy
+    endpoint: anthropic
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.001, completion: 0.005, cache_write_multiplier: 1.25 }
+    context_window: 200000
+    upstream_model: claude-haiku-4-5
+
+  # --- Cohere: DELIBERATELY OMITTED (2026-07-14). Their Compatibility API
+  # (api.cohere.ai/compatibility/v1) IS genuinely OpenAI-compatible — chat completions,
+  # streaming, tool calling, structured outputs all documented — but cohere.com/pricing
+  # publishes per-token prices only for LEGACY models (Command, Command R/R+ 2024); the current
+  # command-a-plus-05-2026 family is "contact sales". No verifiable public price → no entry
+  # (this catalog's prices are load-bearing for cost accounting).

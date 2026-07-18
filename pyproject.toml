@@ -1,0 +1,98 @@
+[project]
+name = "toto-router"
+version = "0.2.0"
+description = "OpenAI-compatible LLM gateway with a routing brain and full per-request provenance."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "FSL-1.1-ALv2" }
+authors = [{ name = "Toto" }]
+
+# Dependency discipline (context doc §9, §14.8): a routing-adjacent tool (LiteLLM)
+# shipped credential-stealing malware on PyPI in 2026. We deliberately do NOT depend
+# on LiteLLM. Versions are floor-pinned here and EXACT-pinned in requirements.lock
+# (generated from a real resolve). Treat dependency bumps as reviewed code changes.
+dependencies = [
+    "fastapi>=0.138,<0.139",
+    # Explicit security floor on FastAPI's transitive dep: starlette < 1.3.1 carries
+    # multiple 2025/2026 CVEs (see SECURITY.md). Pin the patched line directly.
+    "starlette>=1.3.1,<2",
+    "uvicorn[standard]>=0.34,<0.35",
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.6,<3",
+    "httpx>=0.28,<0.29",
+    "pyyaml>=6.0,<7",
+    "sqlmodel>=0.0.22,<0.1",
+    "anthropic>=0.40,<1",
+    "openai>=1.50,<3",
+    # The driver plane (LangGraph state machine): /v1/route + /v1/sessions execute the graph,
+    # so this is a runtime dep. langsmith stays optional (BYO tracing, env-gated).
+    "langgraph>=1.2,<2",
+    # Postgres cutover (docs/plans production-infra Decision 1): the stores run on Postgres when
+    # TOTO_GW_DATABASE_URL is set. [binary] ships the libpq wheel; [pool] is the P1 async upgrade.
+    "psycopg[binary,pool]>=3.2,<4",
+    # Error tracking (infra P1). Init is gated on TOTO_GW_SENTRY_DSN — the dep is installed but
+    # never imported when unconfigured, so an empty-DSN deploy pays zero runtime cost.
+    "sentry-sdk>=2.20,<3",
+    # BYOK at-rest encryption (toto_gateway/credentials.py): Fernet symmetric encryption of users'
+    # own provider API keys. The standard, audited choice for secrets at rest — ships prebuilt
+    # wheels, no rolled crypto, no plaintext keys in the DB.
+    "cryptography>=44,<50",
+    # Metrics exposition (engine-hardening Wave 2, observability). The RED metric surface at
+    # operator-gated /metrics. One well-scoped package (thread-safe registry + correct histogram
+    # buckets) — deliberately NOT the multi-package opentelemetry SDK; any collector scrapes
+    # Prometheus text and re-exports OTLP, so we get portable sinks at one-dep cost.
+    "prometheus-client>=0.21,<1",
+    # Cross-replica coordination tier (engine-hardening Wave 2, R1 — Alex ruling 2026-07-08).
+    # RedisWakeBus (fan-out) + shared circuit-breaker state so replicas learn a dead provider
+    # together. Postgres stays the durable system of record; Redis is the fast ephemeral tier.
+    # redis-py ships native asyncio support (redis.asyncio) — no separate aioredis dep.
+    "redis>=5.2,<9",
+    # At-rest KMS provider (decision #10, toto_gateway/credentials.py): read the Fernet key
+    # material from HashiCorp Vault KV v2 when TOTO_GW_KMS_PROVIDER=vault. hvac is HashiCorp's
+    # official Python client. Imported lazily — an env-mode (default) deploy never touches it.
+    "hvac>=2.1,<3",
+    # OTLP span export (engine-hardening portability interface 5, O5 / decision #12). The SDK +
+    # OTLP exporter behind OTLPTraceWriter. Gated on OTEL_EXPORTER_OTLP_ENDPOINT: unset → never
+    # imported (zero cost), so an unconfigured deploy pays nothing at runtime — same pattern as
+    # sentry-sdk above. Two packages because the SDK and the wire exporter version independently.
+    "opentelemetry-sdk>=1.29,<2",
+    "opentelemetry-exporter-otlp>=1.29,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+    # pytest < 9.0.3 carries CVE-2025-71176; pin the patched line.
+    "pytest>=9.1,<10",
+    "pytest-asyncio>=0.24,<2",
+    "respx>=0.21,<0.22",
+    "asgi-lifespan>=2.1,<3",
+]
+
+[project.scripts]
+toto-router = "toto_gateway.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["toto_gateway"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["error::DeprecationWarning:toto_gateway.*"]
+markers = [
+    # Real-upstream contract tests: hit a live provider (Fireworks/OpenRouter). NOT run in
+    # normal CI — each test pytest.skip()s unless its provider key env var is present, so an
+    # unkeyed `pytest` never instantiates a real client. Run explicitly: `pytest -m integration`.
+    "integration: real-upstream tests, skipped unless the relevant API key env var is set",
+    # Dialect-parity lane (testing.md H5): tests that must run against a REAL Postgres, not just
+    # SQLite, so dual-dialect SQL branches can't silently drift. CI's `postgres` job runs
+    # `pytest -m pg`; the PG parametrizations skip unless TOTO_GW_TEST_DATABASE_URL is set.
+    "pg: must-run-on-Postgres SQL-touching tests (CI postgres job runs `pytest -m pg`)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

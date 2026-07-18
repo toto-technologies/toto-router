@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install
+        run: pip install --no-cache-dir -e ".[dev]"
+      - name: Run pytest
+        run: pytest -q
+
+  console:
+    name: console build (oss)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: control-surface/package-lock.json
+      - name: Install
+        working-directory: control-surface
+        run: npm ci
+      - name: Build (toto-router console)
+        working-directory: control-surface
+        run: npm run build:oss

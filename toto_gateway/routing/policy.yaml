@@ -1,0 +1,22 @@
+# Routing policy constraints. Applied AFTER exemplar similarity; policy beats similarity.
+#
+# Rule shapes:
+#   {intent: <value>, residency: in_perimeter}  — requests with this intent must stay in-perimeter
+#   {when: <keyword>, residency: in_perimeter}  — same, when the intent text contains this keyword
+#   {intent: <value>, lane: frontier}            — force a TIER (rare; residency is the usual key)
+#
+# Privacy keys off RESIDENCY, not tier: sensitive work must physically stay in the perimeter,
+# never on a cheap CLOUD economy model.
+#
+# Global constraints:
+#   max_local_context: 32768         — economy models can't hold larger prompts; escalate frontier
+
+rules:
+  - intent: redact
+    residency: in_perimeter
+  - when: mnpi
+    residency: in_perimeter
+  # Intentional conflict for conflicts() test: two rules forcing different lanes for "summarize"
+  # (one via intent, one hard override below — the test adds a contradicting rule directly)
+
+max_local_context: 32768
