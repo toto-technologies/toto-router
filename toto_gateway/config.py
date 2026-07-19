@@ -31,11 +31,11 @@ class Settings(BaseSettings):
     # Offline leaderboard scores keyed by upstream model (refreshed by
     # scripts/fetch_benchmarks.py). Missing file is fine — routing degrades gracefully.
     benchmarks: str = "benchmarks.yaml"
-    # Optional Artificial Analysis free-tier key for the benchmarking ingest (B2). Empty → the AA
+    # Optional Artificial Analysis free-tier key for the benchmarking ingest. Empty → the AA
     # connector is skipped silently. AA data is INTERNAL-ONLY (redistributable=0); the key is never
     # logged. Env: TOTO_GW_AA_API_KEY.
     aa_api_key: str = ""
-    # Scheduled benchmark refresh cadence in HOURS (B5). 0 = off (default) → refresh only via the
+    # Scheduled benchmark refresh cadence in HOURS. 0 = off (default) → refresh only via the
     # admin endpoint. > 0 → a lifespan task runs the same ingest+overlay hot-swap every N hours
     # (first run delayed N hours; boot already overlays). A failed tick logs once and keeps ticking.
     benchmark_refresh_hours: float = 0.0
@@ -51,26 +51,26 @@ class Settings(BaseSettings):
     trace_jsonl: str = "traces.jsonl"
     trace_db: str = ""
     trace_stdout: bool = True
-    # Observability content-capture switch (Alex 2026-07-08): capture the actual prompt (request
-    # messages) + served response text per request into the `request_content` sibling table, so the
-    # activity log's drill-down shows the real work, not just the decision trail. ON by default.
+    # Observability content capture: store the actual prompt (request messages) + served response
+    # text per request in the `request_content` sibling table, so the activity log's drill-down
+    # shows the real work, not just the decision trail. ON by default.
     # Access-scoped on read (member=own, org admin=org, operator=all); ages out (below). Off → the
     # gateway writes no content and the detail endpoint reports content_available: false.
     log_content: bool = True
     # Content retention: the reaper ages out request_content rows older than this (sibling of
     # delta_retention_days). 0 = keep forever. Requires trace_db (the content table's home).
     content_retention_days: int = 30
-    # Audit-export scheduler tick (W2-C4): how often the exporter wakes to check each org's cadence.
+    # Audit-export scheduler tick: how often the exporter wakes to check each org's cadence.
     # 0 = disable the scheduled task entirely (manual POST .../run still works). Cadence is per-org.
     audit_export_tick_seconds: int = 3600
-    # Content-plane retention sweep (W3-C6): how often the sweeper ages out product storage per each
+    # Content-plane retention sweep: how often the sweeper ages out product storage per each
     # org's retention policy. 0 = disable the scheduled task (manual POST .../retention/run still
     # works). retention_batch_limit bounds the rows deleted per (user, sink) each tick so a large
     # backlog drains over successive ticks instead of one long lock.
     retention_sweep_tick_seconds: int = 3600
     retention_batch_limit: int = 1000
 
-    # Auth — empty means open (single-operator Phase 0 spike).
+    # Operator service credential. Empty means auth is open (single-operator dev posture).
     auth_token: str = ""
 
     # BYOK at-rest encryption secret (toto_gateway/credentials.py). Derives the Fernet key that
@@ -81,10 +81,10 @@ class Settings(BaseSettings):
     # Optional PREVIOUS at-rest secret, kept as a decrypt-only fallback during a zero-downtime
     # rotation window (credentials.py MultiFernet). Empty (default) → single-key, unchanged. Set it
     # to the old secret while credentials_secret holds the new one; new writes use the new key and a
-    # lazy re-encrypt on read drains rows off the old, then drop this. See docs/ops/secrets.md.
+    # lazy re-encrypt on read drains rows off the old, then drop this.
     credentials_secret_old: str = ""
 
-    # At-rest KMS provider (decision #10) — WHERE credentials.py's Fernet key material comes from.
+    # At-rest KMS provider — WHERE credentials.py's Fernet key material comes from.
     # "env" (default) → the credentials_secret[/_old] fields above, byte-for-byte UNCHANGED. "vault"
     # → read the SAME key material from HashiCorp Vault KV v2 via hvac (the KV secret carries fields
     # `credentials_secret` + optional `credentials_secret_old`). FAIL-CLOSED: with provider=vault an
@@ -98,7 +98,7 @@ class Settings(BaseSettings):
     vault_token: str = ""
     vault_kv_path: str = ""     # KV v2 secret path, e.g. "toto/credentials"
 
-    # Phase 1 routing brain. Default off so the offline fake-lane quickstart still works
+    # Routing brain. Default off so the offline fake-lane quickstart still works
     # (routing targets real local/frontier lanes — see appliance/bring_up.py). Flip on once a
     # real box backs the local lane. Cache is independently safe to enable.
     routing: bool = False
@@ -114,9 +114,7 @@ class Settings(BaseSettings):
     # unaffected. When on, POST /v1/route is served.
     driver: bool = False
     # The driver's own reasoning model — a *catalog entry id*, swappable, never welded to one
-    # lab (Q-HARNESS-4). Default is Sonnet 5 (or-sonnet-5): newer AND cheaper than sonnet-4.6, and
-    # it wears the Toto voice best (docs/plans/2026-07-03-toto-agent-voice.md probe). Point it
-    # anywhere in the catalog via TOTO_GW_DRIVER_MODEL.
+    # lab. Point it anywhere in the catalog via TOTO_GW_DRIVER_MODEL.
     driver_model: str = "or-sonnet-5"
     # A cheap model for the triage classifier node (trivial-vs-multistep). Catalog entry id.
     triage_model: str = "or-qwen3-coder-flash"
@@ -130,15 +128,15 @@ class Settings(BaseSettings):
     # truncate. ponytail: five ints, not a nested config object — YAGNI until a 6th role appears.
     max_tokens_triage: int = 200
     max_tokens_answer: int = 1200
-    # decompose emits STRUCTURED JSON (≤4 rich tasks); 600 truncated it mid-object → unparseable
-    # → single-task fallback. Measured: ~4 rich tasks need ~1000-1400 tokens. 1500 still truncated
-    # one flow-eval gold case (2026-07-04, Alex-stamped raise); 2000 gives real headroom.
+    # decompose emits STRUCTURED JSON (≤4 rich tasks); a truncated cap cuts it mid-object →
+    # unparseable → single-task fallback. ~4 rich tasks need ~1000-1400 tokens; 2000 gives
+    # real headroom.
     max_tokens_decompose: int = 2000
     max_tokens_dispatch: int = 1500
-    # The final answer is the product surface — probes showed 1500 clips a 3-part answer.
+    # The final answer is the product surface — lower caps clip multi-part answers.
     max_tokens_synthesize: int = 2500
 
-    # --- Subagent runners (unified-chat-orchestrator C2) ---
+    # --- Subagent runners ---
     # Live pi / claude_code harness adapters: a task authored with metadata.requires.runner
     # ("pi" | "claude_code") executes as a REAL agentic subagent subprocess instead of a one-shot
     # gateway completion. Off (default) → byte-identical pre-runner behavior: parse strips the
@@ -161,23 +159,23 @@ class Settings(BaseSettings):
     # bogus `Retry-After: 9999` header can't wedge a worker for hours. See resilience.backoff.
     provider_backoff_cap: float = 30.0
 
-    # Per-provider I/O timeouts (Wave 1 hardening). The OpenAI/Anthropic SDKs default to a 600s
-    # read timeout — one slow/degraded provider then pins an event-loop task + a concurrency slot
-    # for 10 minutes. We pass an explicit httpx.Timeout instead. connect is a fast fail on a dead
-    # host; read/write/pool track provider_read_timeout. Local (MLX/LM Studio) generation is
+    # Per-provider I/O timeouts. The OpenAI/Anthropic SDKs default to a 600s read timeout — one
+    # slow/degraded provider then pins an event-loop task + a concurrency slot for 10 minutes.
+    # We pass an explicit httpx.Timeout instead. connect is a fast fail on a dead host;
+    # read/write/pool track provider_read_timeout. Local (MLX/LM Studio) generation is
     # genuinely slow, so it keeps a longer, independently-tunable read budget. All env-tunable
     # (TOTO_GW_PROVIDER_READ_TIMEOUT, ...). See Settings.provider_timeout + the runners.
     provider_connect_timeout: float = 5.0
     provider_read_timeout: float = 60.0
     provider_read_timeout_local: float = 300.0
 
-    # Per-provider circuit breaker (Wave 1). A provider (keyed by base_url host) that fails N
+    # Per-provider circuit breaker. A provider (keyed by base_url host) that fails N
     # times in a row is marked OPEN — subsequent calls skip straight to fallback / fast-503 for
     # reset_seconds, then a single HALF_OPEN trial closes or re-opens it. In-process per replica.
     breaker_fail_threshold: int = 5
     breaker_reset_seconds: float = 30.0
 
-    # Stream stall / first-token timeout (Wave 1). A provider that opens the SSE then goes silent
+    # Stream stall / first-token timeout. A provider that opens the SSE then goes silent
     # would otherwise hold the slot for the full read timeout. Abandon a stream whose next chunk
     # doesn't arrive within this inter-chunk deadline; the trace finalizes as error=stream_stall.
     stream_stall_timeout: float = 30.0
@@ -185,14 +183,12 @@ class Settings(BaseSettings):
     # Multi-turn conversations: how many chars of prior (query, answer) history to feed a
     # follow-up turn. Past the cap, whole turns are block-evicted oldest-first down to HALF
     # the cap (hysteresis — keeps the prompt prefix byte-stable for provider caching).
-    # 16000 (~4k tokens) per Alex's stamped Decision 3 (2026-07-04 context-caching plan):
-    # bet on follow-ups landing inside the 5-min cache TTL; prod can tune down via
-    # TOTO_GW_HISTORY_CHARS if the bench shows miss-cost pain.
+    # 16000 (~4k tokens) bets on follow-ups landing inside the 5-min provider cache TTL;
+    # tune down via TOTO_GW_HISTORY_CHARS if cache-miss cost dominates.
     history_chars: int = 16000
 
-    # Anthropic auto-inject prompt caching (multi-model-caching plan priority 3). Most OpenAI-shaped
-    # clients never send `cache_control`, so a continuing Anthropic conversation pays full input
-    # price every turn (a real 9-turn Sonnet session measured 0% cached reads). When on and the
+    # Anthropic auto-inject prompt caching. Most OpenAI-shaped clients never send `cache_control`,
+    # so a continuing Anthropic conversation pays full input price every turn. When on and the
     # request carries NO client breakpoint AND looks continuous (has tools, or >= min_messages), the
     # frontier runner adds Anthropic's top-level automatic `cache_control` so the prefix caches. A
     # one-shot is left alone — it would only eat the 1.25x write premium with nothing to reuse.
@@ -200,16 +196,16 @@ class Settings(BaseSettings):
     anthropic_auto_cache: bool = True
     anthropic_auto_cache_min_messages: int = 3
 
-    # Embedding-powered routing (docs/plans/2026-07-02-embedding-rag-routing.md). Off by default:
-    # skill inference falls back to (and defaults to) the keyword classifier. On → skill via
-    # nearest-centroid over exemplar embeddings, keyword on timeout/error. Corpus logging is
-    # separate and default-on (groundwork for experience-kNN) — it degrades silently with no key.
+    # Embedding-powered routing. Off by default: skill inference falls back to (and defaults to)
+    # the keyword classifier. On → skill via nearest-centroid over exemplar embeddings, keyword on
+    # timeout/error. Corpus logging is separate and default-on (feeds the experience-kNN corpus) —
+    # it degrades silently with no key.
     embed_routing: bool = False
     embed_model: str = "openai/text-embedding-3-small"  # via OpenRouter (existing OPENROUTER_API_KEY)
     embed_timeout_ms: int = 500
     embed_corpus: bool = True
 
-    # Experience-kNN model proposer (P1). Dark by default — the corpus needs ~200 labeled tasks
+    # Experience-kNN model proposer. Dark by default — the corpus needs ~200 labeled tasks
     # before it beats the benchmark prior; flip on once task_embeddings + feedback are dense.
     # Precedence: privacy/guard > pins > kNN (flag on + >= knn_k neighbors) > benchmarks.
     experience_knn: bool = False
@@ -219,61 +215,58 @@ class Settings(BaseSettings):
     knn_max_rows: int = 5000      # cap the brute-force corpus scan (newest-first)
     knn_cost_coeff: float = 0.0   # >0 nudges toward cheaper models among similar performers
 
-    # NVIDIA-style label routing (default ON — it owns dispatch). A haiku-class classifier
-    # labels each sub-task against the closed vocab in routing/labels.yaml; the binding
-    # deterministically picks the model, displacing the benchmark argmax. Any miss — pinned
-    # local, parse failure, unknown/unbound label, classifier down — falls back to classify(),
-    # the ladder NVIDIA's blueprint doesn't have. The optimize knob applies only on that
-    # fallback path. Classifier model absent from the catalog → label routing soft-disables
-    # at build (loud log), so plain-catalog dev boots keep working.
+    # Label routing (default ON — it owns dispatch). A haiku-class classifier labels each
+    # sub-task against the closed vocab in routing/labels.yaml; the binding deterministically
+    # picks the model, displacing the benchmark argmax. Any miss — pinned local, parse failure,
+    # unknown/unbound label, classifier down — falls back to classify(). The optimize knob
+    # applies only on that fallback path. Classifier model absent from the catalog → label
+    # routing soft-disables at build (loud log), so plain-catalog dev boots keep working.
     label_routing: bool = True    # kill switch; off → pre-label routing, byte-identical
     label_classifier_model: str = "or-haiku-4.5"  # catalog entry id the classifier call runs on
     label_bindings: str = ""      # bindings path override; "" → toto_gateway/routing/labels.yaml
     label_timeout_ms: int = 10000  # hard cap on the classifier call; timeout → fallback ladder
     # Classifier prompt variant (driver/prompts.LABEL_PROMPT_VARIANTS), applied to BOTH the
-    # driver's label node and the /v1 smart route. "fewshot" won the 2026-07-10 prompt x model
-    # matrix (+2 macro-F1 over baseline on or-haiku-4.5, 1,040-row synth set, zero downgrades);
+    # driver's label node and the /v1 smart route. "fewshot" (default) outperforms "baseline";
     # "baseline" restores the pre-variant prompt byte-identically. Unknown value fails at boot.
     label_prompt_variant: str = "fewshot"
-    # Fast tagging model for the /v1 smart route (Alex: gemini-2.5-flash for speed, temporary).
-    # Empty → the smart path reuses label_classifier_model (driver + smart share one classifier).
-    # Set (env TOTO_GW_SMART_CLASSIFIER_MODEL) to point ONLY the /v1/chat/completions smart-route
+    # Fast tagging model for the /v1 smart route. Empty → the smart path reuses
+    # label_classifier_model (driver + smart share one classifier). Set (env
+    # TOTO_GW_SMART_CLASSIFIER_MODEL) to point ONLY the /v1/chat/completions smart-route
     # tagging at a different catalog entry (e.g. or-gemini-2.5-flash) without touching the driver's classifier.
     # A configured id absent from the catalog degrades gracefully (smart:classify_failed), never 500.
     smart_classifier_model: str = ""
-    # Global default per-task-type memo holds for LabelAwareTTL (S2): a JSON object {label: seconds}
+    # Global default per-task-type memo holds for LabelAwareTTL: a JSON object {label: seconds}
     # e.g. {"code_generation": 3600, "classification": 120}. Empty → every label falls to the flat
     # 900s hold (identical to SlidingTTL). A team/org routing-policy `stick_ttls` overrides per label.
     stick_ttls: str = ""
-    # TTL-aware incumbent hold (chunk B): while a conversation's warm model still has a live upstream
+    # TTL-aware incumbent hold: while a conversation's warm model still has a live upstream
     # prefix cache (inside the provider cache TTL), the smart route keeps it over a freshly-resolved
     # model rather than forfeiting the ~90% cache-read discount. Off (TOTO_GW_WARMTH_ROUTING=0) →
-    # pure fresh resolution every turn (pre-chunk-B behavior). Bindings still win (they re-classify
-    # via the memo key); warmth only holds against benchmark/optimize drift on an unchanged binding.
+    # pure fresh resolution every turn. Bindings still win (they re-classify via the memo key);
+    # warmth only holds against benchmark/optimize drift on an unchanged binding.
     warmth_routing: bool = True
 
-    # --- Companion (docs/plans/2026-07-03-toto-companion-agent.md) ---
+    # --- Companion ---
     # The persistent partner agent — state in the gateway DB, woken per message, LangGraph loop.
-    # Rides the driver plane (needs TOTO_GW_DRIVER=1). P0: every turn on one model (Decision 5).
+    # Rides the driver plane (needs TOTO_GW_DRIVER=1). Every turn runs on one model.
     companion_model: str = "or-sonnet-5"
     # Voice turns run on a faster edge-class model (first-token latency dominates voice UX). Empty
-    # = use companion_model (no behavior change until set); the model is chosen later by a bench.
-    # Budget degrade still overrides this to triage_model past companion_daily_usd.
+    # = use companion_model (no behavior change until set). Budget degrade still overrides this
+    # to triage_model past companion_daily_usd.
     companion_voice_model: str = ""
     # Per-user daily chat spend (USD). Past it, companion turns run on the economy model
-    # (triage_model) — the partner goes terse, never mute (Decision 6). 0 = no budget.
+    # (triage_model) — the partner goes terse, never mute. 0 = no budget.
     companion_daily_usd: float = 1.0
 
-    # --- Companion voice / TTS (docs/plans/2026-07-05-voice-companion.md P0) ---
+    # --- Companion voice / TTS ---
     # Speech-OUT leg: POST /v1/companion/speak proxies ElevenLabs Flash streaming audio. Off by
     # default — the frontend voice toggle only calls /speak when this is on. The provider key is
     # read straight from ELEVENLABS_API_KEY (provider convention, runners/openai.py), NOT the
     # TOTO_GW_ prefix; absent → clean 503 and the client degrades to text-only.
     companion_tts: bool = False
     companion_tts_model: str = "eleven_flash_v2_5"
-    # Default voice + audition set — warm "confident coworker friend" ElevenLabs library voices;
-    # Alex stamps one by ear during QA (Decision 2). Named ids (change the default with
-    # TOTO_GW_COMPANION_TTS_VOICE to any id from the candidates):
+    # Default voice + audition set — warm "confident coworker friend" ElevenLabs library voices.
+    # Named ids (change the default with TOTO_GW_COMPANION_TTS_VOICE to any id from the candidates):
     #   Rachel   (21m00Tcm4TlvDq8ikWAM) — calm, warm, even — the safe default
     #   Charlotte(XB0fDUnXU5powFXDhCwa) — natural, friendly, a touch brighter
     #   Callum   (N2lVS1w4EtoT3dr4eOWO) — grounded, warm male coworker
@@ -287,14 +280,14 @@ class Settings(BaseSettings):
         "21m00Tcm4TlvDq8ikWAM,XB0fDUnXU5powFXDhCwa,N2lVS1w4EtoT3dr4eOWO,Xb7hH8MSUJpSbSDYk0k2,"
         "onwK4e9ZLuTAKqWW03F9,pNInz6obpgDQGcFmaJgB"
     )
-    # Per-user/day TTS spend cap (USD). Past it → text-only degrade with one plain notice
-    # (Decision 6). 0 = no budget. Separate from companion_daily_usd (the chat-LLM budget).
+    # Per-user/day TTS spend cap (USD). Past it → text-only degrade with one plain notice.
+    # 0 = no budget. Separate from companion_daily_usd (the chat-LLM budget).
     companion_tts_daily_usd: float = 1.0
-    # Per-VOICE-SESSION spend cap (USD) — sustained conversation is a metered premium tier
-    # (voice-agent plan, STAMPED decision 6). A "voice session" is toggle-on → toggle-off/idle-
-    # timeout, tracked CLIENT-side (the burn meter); this budget is handed to the client at
-    # bootstrap and enforced there (over it → one spoken+shown notice, text-only continues). The
-    # daily cap (companion_tts_daily_usd) still applies underneath. 0 = no per-session budget.
+    # Per-VOICE-SESSION spend cap (USD) — sustained conversation is a metered premium tier.
+    # A "voice session" is toggle-on → toggle-off/idle-timeout, tracked CLIENT-side (the burn
+    # meter); this budget is handed to the client at bootstrap and enforced there (over it →
+    # one spoken+shown notice, text-only continues). The daily cap (companion_tts_daily_usd)
+    # still applies underneath. 0 = no per-session budget.
     companion_voice_session_usd: float = 3.0
     # Billing rate: USD per 1k characters synthesized — the calibration knob. ElevenLabs bills by
     # credits/plan, so tune this to the real invoice; Flash v2.5 ≈ $0.04/1k chars at list.
@@ -316,16 +309,16 @@ class Settings(BaseSettings):
     # (RRF: score = Σ weight/(60 + rank)) — robust, no score-scale tuning. Vector leads.
     memory_vec_weight: float = 0.7
     memory_kw_weight: float = 0.3
-    # Rerank stage (the wake path's relevance filter — gbrain's reranker, rebuilt on our own
-    # metering). Retrieval fuses top-N candidates, then an LLM reorders + cuts to k. Default on
-    # when memory is on; degrades to fused order on timeout/error (NEVER fails recall). Uses the
-    # economy model via our OWN gateway complete() — no external reranker vendor.
+    # Rerank stage (the wake path's relevance filter). Retrieval fuses top-N candidates, then an
+    # LLM reorders + cuts to k. Default on when memory is on; degrades to fused order on
+    # timeout/error (NEVER fails recall). Uses the economy model via our OWN gateway
+    # complete() — no external reranker vendor.
     memory_rerank: bool = True
     memory_rerank_model: str = ""       # empty → triage_model (economy class)
     memory_rerank_budget_ms: int = 600  # per-call ceiling; over it → fused order, no rerank
     memory_rerank_candidates: int = 20  # top-N fused candidates fed to the reranker
 
-    # --- memory lifecycle: extraction (docs/plans/2026-07-05-memory-lifecycle.md P0) ---
+    # --- memory lifecycle: extraction ---
     # A post-capture async distiller turns raw captures into short typed facts written through the
     # SAME path as the companion's memory_write (caps/eviction/injection intact). Off by default →
     # captures still happen, just no auto-distillation. Needs the recall plane on (memory=1).
@@ -335,17 +328,17 @@ class Settings(BaseSettings):
     memory_extract_daily_usd: float = 0.25  # per-user/day cap; past it extraction no-ops that day
     memory_extract_dedupe_sim: float = 0.85  # token-overlap floor above which a candidate is a dup
 
-    # --- memory lifecycle: dreams (P1 nightly consolidation) ---
+    # --- memory lifecycle: dreams (nightly consolidation) ---
     # One in-process pass per active tenant per night (sibling of the reaper), leader-guarded by a
     # per-(tenant,date) claim row. Merges near-duplicate captures + soft-archives stale ones (never
-    # hard-deletes, D2), writes a digest brain doc. Off by default. Needs memory=1.
+    # hard-deletes), writes a digest brain doc. Off by default. Needs memory=1.
     memory_dreams: bool = False
-    memory_dream_hour: int = 3            # UTC hour the nightly pass fires (open-q: per-region later)
+    memory_dream_hour: int = 3            # UTC hour the nightly pass fires
     memory_dream_daily_usd: float = 0.10  # per-tenant/night budget cap; a leg stops when spent
     memory_dream_stale_days: int = 30    # captures older than this with no activity get soft-archived
     memory_dream_merge_sim: float = 0.90  # token-overlap floor to cluster two captures for merge
 
-    # --- calendar ICS sync (calendar kind, rung P1) ---
+    # --- calendar ICS sync ---
     # A periodic in-process job (sibling of the reaper/dreamer), leader-guarded by a pg advisory
     # lock. Each tick fetches every calendar object's subscriptions[].url, parses VEVENTs, and
     # REPLACES the events tagged with that source (never touching source:"toto" events). Off by
@@ -355,9 +348,9 @@ class Settings(BaseSettings):
     cal_sync_timeout: float = 10.0        # per-feed fetch timeout (s)
     cal_sync_max_events: int = 200        # per-source event clamp, so a huge feed can't blow the 32KB payload
 
-    # --- Pipedream Connect (calendar-login pilot, docs/plans/2026-07-06-pipedream-assessment.md) ---
-    # Flag-gated, read-only, Alex-only-first external surface: a user logs into their existing
-    # Google Calendar via Pipedream's hosted OAuth (Connect Link), and the _calsync tick pulls their
+    # --- Pipedream Connect ---
+    # Flag-gated, read-only external calendar surface: a user logs into their existing Google
+    # Calendar via Pipedream's hosted OAuth (Connect Link), and the _calsync tick pulls their
     # events through Pipedream's proxy. external_user_id = the toto user_id (Pipedream isolates per
     # that id). All off/unset → the endpoints 404 and the sync branch is skipped; nothing errors.
     # environment "development" is $0 (dev while piloting); flip to "production" for the live plan.
@@ -367,7 +360,7 @@ class Settings(BaseSettings):
     pipedream_project_id: str = ""
     pipedream_environment: str = "development"   # development ($0) | production
 
-    # --- Custom tools + module templates (docs/plans/2026-07-06-tool-contract.md) ---
+    # --- Custom tools + module templates ---
     # Declarative user-authored tools (JSON specs composing canonical tools) + canvas templates.
     # Default off → the REST routes 404, the companion never registers create_tool/run_custom_tool/
     # instantiate_template/delete_tool, and CUSTOM stays out of every scope (the fail-closed
@@ -375,16 +368,16 @@ class Settings(BaseSettings):
     custom_tools: bool = False
 
     # Toto metadata plane. The driver persists task metadata + execution provenance here — NEVER
-    # prompts/answers/content (feedback_toto_doesnt_want_your_data). Empty token → persistence is
-    # skipped gracefully (the driver still routes + answers; it just doesn't write the task graph).
+    # prompts/answers/content. Empty token → persistence is skipped gracefully (the driver still
+    # routes + answers; it just doesn't write the task graph).
     toto_url: str = "https://toto.tech"
     toto_token: str = ""
-    # Provision-on-signup (Alex 2026-07-10): the shared secret for Toto's internal
-    # POST /api/internal/provision endpoint. Set → a user who becomes real (email verified) is auto-
-    # provisioned a Toto-app identity + API key, vaulted per-user (credentials.py "toto" slot) and
-    # used by the Toto-writing surfaces instead of the shared toto_token. Empty (default) → no
-    # provisioning; those surfaces fall back to toto_token exactly as before. FAIL-OPEN: a provision
-    # failure never blocks signup or a request. Never logged.
+    # Provision-on-signup: the shared secret for Toto's internal POST /api/internal/provision
+    # endpoint. Set → a user who becomes real (email verified) is auto-provisioned a Toto-app
+    # identity + API key, vaulted per-user (credentials.py "toto" slot) and used by the
+    # Toto-writing surfaces instead of the shared toto_token. Empty (default) → no provisioning;
+    # those surfaces fall back to toto_token exactly as before. FAIL-OPEN: a provision failure
+    # never blocks signup or a request. Never logged.
     toto_provision_secret: str = ""
 
     # Driver observability: every graph node emits one span to this JSONL sink (always on — the
@@ -396,18 +389,18 @@ class Settings(BaseSettings):
     # tests. Only opened when the driver is on.
     db: str = "data/gateway.db"
     # Postgres cutover: empty → SQLite at `db` (exactly today). Set to a psycopg URL
-    # (postgresql://...) → the stores run on Postgres. See docs/plans production-infra Decision 1.
+    # (postgresql://...) → the stores run on Postgres.
     database_url: str = ""
-    # Redis coordination tier (Wave 2 R1, ratified 2026-07-08). OPTIONAL and fail-open: set to a
-    # redis:// URL → cross-replica SSE fan-out (RedisWakeBus) + shared circuit-breaker OPEN state.
-    # Empty (the default) → PG LISTEN/NOTIFY fan-out + per-replica breaker, exactly as before. A
-    # Redis outage degrades to per-replica behaviour, never crashes the request path.
+    # Redis coordination tier. OPTIONAL and fail-open: set to a redis:// URL → cross-replica SSE
+    # fan-out (RedisWakeBus) + shared circuit-breaker OPEN state. Empty (the default) → PG
+    # LISTEN/NOTIFY fan-out + per-replica breaker, exactly as before. A Redis outage degrades to
+    # per-replica behaviour, never crashes the request path.
     redis_url: str = ""
-    # --- Object store (interface 3, decision #8; toto_gateway/storage.py) ---
+    # --- Object store (toto_gateway/storage.py) ---
     # Per-user key-scoped blob storage. No S3 endpoint → FilesystemBackend under storage_dir (dev
     # default, zero cloud). Set s3_endpoint → S3Backend via a thin httpx SigV4 signer (no boto3).
-    # Names match the .env.compose proposed contract (TOTO_GW_S3_*). MinIO speaks path-style, so
-    # force_path_style defaults True — it also makes the compose MinIO work with no extra env.
+    # MinIO speaks path-style, so force_path_style defaults True — it also makes the compose MinIO
+    # work with no extra env.
     # ponytail: path-style default; set TOTO_GW_S3_FORCE_PATH_STYLE=false for AWS virtual-host style.
     storage_dir: str = "data/objects"
     s3_endpoint: str = ""
@@ -417,13 +410,12 @@ class Settings(BaseSettings):
     s3_secret: str = ""
     s3_force_path_style: bool = True
 
-    # Content plane (docs/plans/2026-07-04-brain-markdown-filesystem.md): authored markdown
-    # (brain files, note bodies) + the memory recall plane (captures + embeddings) live here.
-    # Resolution order (app.create_app): CONTENT_DATABASE_URL if set (a dedicated Postgres for a
-    # sole-tenant customer — the registry code stays), ELSE the primary DATABASE_URL under a
-    # `content` schema (the enterprise default: one Postgres, two schemas), ELSE SQLite at
-    # `content_db` (dev only). Hard rule: when DATABASE_URL is set the content plane NEVER falls
-    # back to ephemeral SQLite — that path is impossible on Railway.
+    # Content plane: authored markdown (brain files, note bodies) + the memory recall plane
+    # (captures + embeddings) live here. Resolution order (app.create_app): CONTENT_DATABASE_URL
+    # if set (a dedicated Postgres for a sole-tenant customer — the registry code stays), ELSE the
+    # primary DATABASE_URL under a `content` schema (the enterprise default: one Postgres, two
+    # schemas), ELSE SQLite at `content_db` (dev only). Hard rule: when DATABASE_URL is set the
+    # content plane NEVER falls back to ephemeral SQLite — that path is impossible on Railway.
     content_db: str = "data/content.db"
     content_database_url: str = ""
     # Postgres schema for the co-located content plane (the DATABASE_URL default above). Ignored
@@ -433,48 +425,47 @@ class Settings(BaseSettings):
     # cross-origin access. The permissive `cors` dev flag above is separate and dev-only.
     cors_origin: str = ""
 
-    # --- User accounts & auth (docs/plans/2026-07-02-user-accounts-auth.md) ---
+    # --- User accounts & auth ---
     # Login is required everywhere except the public routes (/healthz, /svelte/*, /v1/auth/*): an
     # unauthenticated caller gets 401 (see routes/deps.require_auth). Not a flag — it's the posture.
-    # auth_token below still configures the operator service credential.
+    # auth_token above still configures the operator service credential.
     # Registration invite gate. Set → register requires a matching code (prod posture);
     # empty → open registration (dev).
     invite_code: str = ""
-    # Email-verification gate on login. Off (2026-07-04, Alex: "remove it now on testing,
-    # staging and prod") — verification emails/links still work and mark the row, login just
-    # doesn't block on it. Re-arm with TOTO_GW_REQUIRE_EMAIL_VERIFY=true when it matters.
+    # Email-verification gate on login. Off by default — verification emails/links still work and
+    # mark the row, login just doesn't block on it. Re-arm with TOTO_GW_REQUIRE_EMAIL_VERIFY=true.
     require_email_verify: bool = False
     # Session cookie `Secure` flag. True in prod (HTTPS); flip off in local .env over http.
     cookie_secure: bool = True
     session_ttl_days: int = 30
-    # SMTP (P1). Unconfigured (empty host) → mailer prints the verify link to stdout (dev mode).
+    # SMTP. Unconfigured (empty host) → mailer prints the verify link to stdout (dev mode).
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_pass: str = ""
     smtp_from: str = ""
-    # Google OAuth (P1 placeholders — endpoints not built in P0).
+    # Google OAuth (placeholders — endpoints not built yet).
     google_client_id: str = ""
     google_client_secret: str = ""
     # Public origin of the app, used to build verification links. Empty → derived from request.
     public_url: str = ""
 
-    # --- Ops / lifecycle (docs/plans/2026-07-02-production-infra-soc2.md, D3/D6) ---
+    # --- Ops / lifecycle ---
     log_level: str = "info"
     # Graceful drain on SIGTERM: seconds to let in-flight driver runs finish before failing them.
     drain_seconds: int = 30
     # Reaper: a run still 'running' with no event newer than this is failed as orphaned/hung.
     run_timeout: int = 600
-    # Wave C (multi-replica). Delta retention: the reaper prunes answer_delta events of terminal
-    # runs older than this (deltas are ~90% of bytes, redundant once sessions.answer is stored;
-    # spans kept). Daily per-user run quota (PG rate-limit table); 0 = unlimited.
+    # Delta retention: the reaper prunes answer_delta events of terminal runs older than this
+    # (deltas are ~90% of bytes, redundant once sessions.answer is stored; spans kept).
+    # Daily per-user run quota (PG rate-limit table); 0 = unlimited.
     delta_retention_days: int = 7
     daily_run_quota: int = 0
     # Max bare items enriched per /v1/lists/{id}/enrich call (each item = one model call). Caps
     # per-request cost/fan-out. Tunable via TOTO_GW_ENRICH_MAX_ITEMS env var.
     enrich_max_items: int = 20
 
-    # --- Prompt tuning (docs/plans/2026-07-04-prompt-dashboard.md P0) ---
+    # --- Prompt tuning ---
     # Optional JSON file {surface_name: text} overriding driver/prompts.py surfaces at load
     # (and live via PUT /v1/dev/prompts). Empty/missing file → byte-identical prompts;
     # malformed file → loud startup failure. See prompts.PROMPT_SURFACES for the names.
@@ -493,30 +484,30 @@ class Settings(BaseSettings):
     # Mounts /dev + /v1/dev/* (prompt editor, eval runner). Dev/sandbox ONLY — the routes
     # simply don't exist unless this is on (scripts/sandbox.sh sets it). NEVER set in prod.
     dev_dashboard: bool = False
-    # Which product planes this deploy mounts (gateway/driver boundary doc, Q5). "gateway" = the
-    # pure API/gateway (A) + driver (B) + gateway features (BYOK, tool contract) — ALWAYS mounted.
-    # "app" = the Toto product surface (companion/canvas/tasks/objects/integrations) + the SPA.
-    # Default "gateway,app" = today's full behavior; set TOTO_GW_PLANES=gateway for a gateway-only
-    # deploy (the v1.0 SKU default). Comma-separated; unknown planes are ignored, dev routers are
-    # independent (dev_dashboard). See app.py plane_routers for the map.
+    # Which product planes this deploy mounts. "gateway" = the pure API/gateway + driver +
+    # gateway features (BYOK, tool contract) — ALWAYS mounted. "app" = the Toto product surface
+    # (companion/canvas/tasks/objects/integrations) + the SPA. Default "gateway,app" = the full
+    # behavior; set TOTO_GW_PLANES=gateway for a gateway-only deploy. Comma-separated; unknown
+    # planes are ignored, dev routers are independent (dev_dashboard). See app.py plane_routers
+    # for the map.
     planes: str = "gateway,app"
-    # Which edition this deploy runs (open-core seam — docs/plans/2026-07-14-oss-edition.md).
-    # "enterprise" (default) mounts the org/enterprise admin routers on the gateway plane;
-    # "oss" leaves them unmounted, so every org-scoped /v1/admin (+ /scim) route is a plain 404
-    # (same pattern as planes/dev_dashboard). Any value other than "oss" means enterprise — a
-    # typo must never strip a running enterprise deploy of its org surface.
+    # Which edition this deploy runs (open-core seam). "enterprise" (default) mounts the
+    # org/enterprise admin routers on the gateway plane; "oss" leaves them unmounted, so every
+    # org-scoped /v1/admin (+ /scim) route is a plain 404 (same pattern as planes/dev_dashboard).
+    # Any value other than "oss" means enterprise — a typo must never strip a running enterprise
+    # deploy of its org surface.
     edition: str = "oss"
     # QA harness target: the deployed TESTING env the /dev/qa fixtures land on. Token is an
     # operator bearer (keychain 'Toto Testing Auth Token' → sandbox.sh exports it). Empty
     # token → fixture generation returns 400; the catalog + checklists still render.
     # ponytail / portability: this is the ONE Railway string in the whole codebase and it is
-    # DEV-HARNESS-ONLY — inert unless dev_dashboard=1 (never set in prod). Not a runtime coupling;
-    # the portability contract (docs/portability.md, interface 1) treats it as cosmetic. Override
-    # with TOTO_GW_TESTING_URL to point the harness anywhere.
+    # DEV-HARNESS-ONLY — inert unless dev_dashboard=1 (never set in prod). Not a runtime
+    # coupling; treated as cosmetic. Override with TOTO_GW_TESTING_URL to point the harness
+    # anywhere.
     testing_url: str = ""
     testing_token: str = ""
 
-    # --- Surge / incident (infra P1: observability + backpressure) ---
+    # --- Surge / incident ---
     # Error tracking. Empty DSN → Sentry never initializes (zero overhead). Content is never sent
     # (send_default_pii=False + include_local_variables=False + a scrubbing before_send).
     # traces_sample_rate 0 = errors only.
@@ -524,7 +515,7 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 0.0
     # Deploy environment tag (testing|staging|prod) so on-call can split issues in the Sentry UI.
     sentry_environment: str = ""
-    # SSE keep-alive comment cadence (was hardcoded). Lower for flaky proxies, higher to cut noise.
+    # SSE keep-alive comment cadence. Lower for flaky proxies, higher to cut noise.
     sse_heartbeat_seconds: int = 15
     # Backpressure for user surges: cap simultaneous driver runs PER REPLICA (0 = unlimited).
     # At the cap, run creation returns 429 + Retry-After instead of piling on and OOMing.
@@ -534,8 +525,8 @@ class Settings(BaseSettings):
     # AsyncStoreMixin acquires a conn per query and releases it immediately, so a run holds ~1–2
     # conns concurrently at peak (a delta publish overlapping a span write). With avg≈2 and
     # pool_max=20: 8 × 2 = 16 < 20, leaving headroom for the reaper, the LISTEN conn, and psql.
-    # ponytail: 8 is a derived default — re-tune alongside pool_max per the PG plan (Chunk 6 gives
-    # the measured avg_conns_per_run).
+    # ponytail: 8 is a derived default — re-tune alongside pool_max per the PG plan using the
+    # measured avg_conns_per_run.
     max_concurrent_runs: int = 8
     # Global valve on concurrent OUTBOUND LLM calls per replica (0 = unlimited) — bounds the
     # surge amplifier where N runs each fan out to ≤4 dispatch calls at once. Coordinate with
@@ -546,15 +537,15 @@ class Settings(BaseSettings):
     delta_flush_chars: int = 120
     delta_flush_ms: int = 200
 
-    # --- Persona (docs boundary Q6 — brand un-weld) ---
+    # --- Persona ---
     # The ONE brand-carrying surface. The routing engine (driver/prompts.py) carries zero brand;
     # the persona composes on top of the two user-facing answer prompts + the companion, resolved
-    # by toto_gateway/persona.get_persona(). "toto" (default) → the shipped identity+voice,
-    # byte-identical to before. "neutral" → a minimal brand-free assistant. Any other value is a
-    # file path (used verbatim if it exists) or an inline system string. Set TOTO_GW_PERSONA.
+    # by toto_gateway/persona.get_persona(). "toto" (default) → the shipped identity+voice.
+    # "neutral" → a minimal brand-free assistant. Any other value is a file path (used verbatim
+    # if it exists) or an inline system string. Set TOTO_GW_PERSONA.
     persona: str = "toto"
 
-    # --- Egress allowlist (W2-C6, toto_gateway/egress.py) ---
+    # --- Egress allowlist (toto_gateway/egress.py) ---
     # One chokepoint over every outbound host. The allowed set is DERIVED from config (catalog
     # base_urls, provider hosts, toto_url, SMTP/S3/OTLP/Sentry/LangSmith, SSO issuers) — this is the
     # operator extension for anything derivation can't see (a corporate calendar/ICS feed host, a
@@ -563,19 +554,19 @@ class Settings(BaseSettings):
     egress_extra: str = ""
     egress_enforce: bool = False
 
-    # --- Distribution license (W3-C7, toto_gateway/license.py) ---
+    # --- Distribution license (toto_gateway/license.py) ---
     # A compact Ed25519-signed token proving entitlement offline (no phone-home). Empty is fine for
     # dev/OSS. license_required arms the HARD-GATE-WITH-GRACE posture: a missing/invalid/past-grace
     # key then refuses chat-plane traffic (503) while /healthz, /statusz and /console stay up. The
-    # in-perimeter bundle's compose sets TOTO_GW_LICENSE_REQUIRED=1; dev/OSS leaves it 0 (unchanged).
+    # in-perimeter bundle's compose sets TOTO_GW_LICENSE_REQUIRED=1; dev/OSS leaves it 0.
     license_key: str = ""
     license_required: bool = False
 
     # Passthrough (/v1/chat/completions) cross-provider fallback. ON by default so a pinned
-    # model that is down still gets answered by a same-residency sibling (Alex ruling); a caller
-    # who truly pinned the model opts out per-request with the `x-toto-no-fallback` header. The
-    # served model is always reported back in response.x_toto.model. Same-model retry is
-    # independent of this flag.
+    # model that is down still gets answered by a same-residency sibling; a caller who truly
+    # pinned the model opts out per-request with the `x-toto-no-fallback` header. The served
+    # model is always reported back in response.x_toto.model. Same-model retry is independent
+    # of this flag.
     passthrough_fallback: bool = True
 
     def provider_timeout(self, *, local: bool = False):

@@ -10,6 +10,13 @@ Each node is an ordinary async method taking the graph `state` and returning the
 updates — so every node is unit-testable with a fake `complete_fn`, no LangGraph required.
 `graph.py` only *wires* these into a StateGraph (framework at the edge). `run()` drives them.
 
+Module layout (split by concern; this module re-exports the full historical surface):
+  - contracts.py — Exec + the fn seams (CompleteFn/StreamFn/Observer), RouteState,
+    DriverResult, RouteDecision, and the pure helpers.
+  - dispatch.py — per-task decide (pure) + execute; `/v1/routing/decide` shares decide_one.
+  - streaming.py — delta batching + the mid-stream tool-call guard.
+  - graph.py — the LangGraph wiring of the nodes below (the topology in one screen).
+
 LangGraph contract (verified against 1.2.7): a node must RETURN its channel updates — in-place
 mutation of the state dict does not reliably persist. So spans are accumulated via a reducer
 (`Annotated[list, operator.add]`): helpers return the spans they emit, nodes aggregate and
@@ -28,16 +35,13 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import operator
-import re
 import time
 import uuid
-from dataclasses import dataclass, field
-from typing import Annotated, Any, Awaitable, Callable, TypedDict
+from typing import Any, Callable
 
 from ..artifacts import make_artifact
 from ..benchmarks import Benchmarks
-from ..catalog import Catalog, effective_catalog
+from ..catalog import Catalog
 from ..pipeline import BLOCK, DOWNGRADE_LOCAL, Signal
 from ..resilience import backoff as _backoff_fn
 from ..resilience import err_label as _err_label
@@ -49,145 +53,30 @@ from ..signals.guards import RuleGuard
 from .. import persona
 from . import prompts
 from .adapters import AdapterRegistry
-from .classify import TaskDecision, classify
+from .contracts import (  # re-exported: the historical driver.core surface
+    _DELTA_CHARS,
+    _DELTA_SECS,
+    MAX_DECOMPOSE_TASKS,
+    CompleteFn,
+    DriverResult,
+    Exec,
+    Observer,
+    RouteDecision,
+    RouteState,
+    StreamFn,
+    _first_in_perimeter_model,
+    _list_name,
+    _privacy_pinned,
+    _safe_corpus,
+)
+from .dispatch import classify_label, decide_one, dispatch_one, effective_catalog_for
+from .streaming import _TOOL_OBJ_RE, stream_run  # re-exported
 from .toto_client import TotoClient
 
-# Cap decomposition fan-out: more tasks = more parallel frontier calls + a bigger synthesis
-# prompt, and over-decomposition was the main latency multiplier. The prompt also asks for ≤4.
-MAX_DECOMPOSE_TASKS = 4
-
-# A JSON tool-call object opening. In a gated companion stream, a committed plain answer that
-# grows a trailing `{"tool" …}` is the model narrating then appending the call it should have
-# emitted alone — freeze at the brace so the raw JSON never streams (or gets spoken). Whitespace
-# after `{` tolerated; a real answer never contains this literal.
-_TOOL_OBJ_RE = re.compile(r'\{\s*"tool"')
-
-
-@dataclass
-class Exec:
-    """Normalized result of one executor completion — text plus the provenance we account."""
-
-    text: str
-    model: str = ""
-    lane: str = ""
-    tokens_prompt: int = 0
-    tokens_completion: int = 0
-    tokens_cached: int = 0  # prompt tokens the provider served from cache
-    cost_usd: float | None = None
-    latency_ms: int = 0
-    adapter: str = ""  # which HarnessAdapter ran it (provenance)
-    # What the UPSTREAM actually served (vs `model`, the internal catalog alias). Empty on
-    # fakes/providers that don't return them → the trace just omits them.
-    upstream_model: str = ""  # served model string, e.g. "anthropic/claude-sonnet-5"
-    provider: str = ""        # provider that answered (OpenRouter body field)
-    generation_id: str = ""   # upstream generation id
-
-
-# Given a request, produce an Exec. Wraps gateway.complete() so the driver stays decoupled
-# from Gateway internals and is trivially fakeable in tests.
-CompleteFn = Callable[[ChatCompletionRequest], Awaitable[Exec]]
-
-# Like CompleteFn but streams: awaits on_delta(chunk_text) as text arrives, returns the full Exec.
-# on_delta is a coroutine (it publishes each batch to the async run store), so callers must await it.
-StreamFn = Callable[[ChatCompletionRequest, Callable[[str], Awaitable[None]]], Awaitable[Exec]]
-
-# Observer sink for spans (local JSONL writer in prod; a list.append in tests). Never raises.
-Observer = Callable[[dict], None]
-
-# Batch streamed deltas before publishing (each publish = a SQLite row + fan-out): flush when
-# the buffer reaches this many chars OR this many seconds elapse, whichever first.
-_DELTA_CHARS, _DELTA_SECS = 120, 0.2
-
-
-def _privacy_pinned(reason: str) -> bool:
-    """True when routing forced a residency/guard boundary a fallback must not cross."""
-    return reason.startswith("privacy") or "downgrade_local" in reason
-
-
-async def _safe_corpus(sink, *args) -> None:
-    """Run the fire-and-forget corpus write; swallow everything (groundwork must never break a run)."""
-    try:
-        await sink(*args)
-    except Exception:
-        pass
-
-
-class RouteState(TypedDict, total=False):
-    query: str
-    user_id: str                           # run owner — scopes the per-user Settings read in dispatch
-    history: list                          # prior [{query, answer}] turns (multi-turn context)
-    optimize: str                          # user knob: "quality" | "balanced" | "cost"
-    kind: str                              # "trivial" | "multistep"
-    answer: str
-    tasks: list[dict]                      # grows metadata + lane/model_id/result/execution/item_id
-    list_id: str | None
-    local_pinned: bool                     # guard pinned the whole run local on the RAW query
-    spans: Annotated[list, operator.add]   # reducer: nodes contribute; the channel accumulates
-
-
-@dataclass
-class DriverResult:
-    query: str
-    kind: str
-    answer: str
-    tasks: list[dict] = field(default_factory=list)
-    list_id: str | None = None
-    spans: list[dict] = field(default_factory=list)
-
-    def provenance(self) -> dict:
-        """Roll-up for the API response: per-task routing + total economics."""
-        routed = [t for t in self.tasks if t.get("execution")]
-        cost = sum((t["execution"].get("cost_usd") or 0.0) for t in routed)
-        return {
-            "kind": self.kind,
-            "list_id": self.list_id,
-            "n_tasks": len(self.tasks),
-            "cost_usd": round(cost, 6),
-            "tasks": [
-                {
-                    "task": t.get("task"),
-                    "lane": t.get("lane"),
-                    "model": t.get("model_id"),
-                    "tools_required": t.get("tools_required") or [],
-                    "route_reason": (t.get("execution") or {}).get("route_reason"),
-                    "outcome": (t.get("execution") or {}).get("outcome"),
-                    "item_id": t.get("item_id"),
-                }
-                for t in self.tasks
-            ],
-        }
-
-
-def _first_in_perimeter_model(catalog: Catalog) -> str | None:
-    """First in-perimeter model (residency, not tier) — the privacy-guard downgrade target.
-    Real box preferred; a fake in-perimeter entry is an acceptable offline fallback."""
-    for e in catalog.models:
-        if e.residency_class == "in_perimeter" and e.endpoint != "fake":
-            return e.id
-    for e in catalog.models:
-        if e.residency_class == "in_perimeter":
-            return e.id
-    return None
-
-
-@dataclass
-class RouteDecision:
-    """Pure routing outcome for one task — what `_dispatch_one` decides BEFORE it executes.
-    `_decide_one` produces it; `_dispatch_one` executes it; `/v1/routing/decide` serializes it.
-    Same function on both paths, so a decision preview can never diverge from what dispatch does."""
-    dec: TaskDecision | None            # None only when blocked
-    rejected: list[dict]                # in-lane/overridden alternatives, each {"model_id","reason"}
-    label: str | None                   # NVIDIA-style label (None = off / no-label / fallback)
-    label_metadata: dict | None = None  # totoshape classify metadata → merged onto the Toto task
-    local_pinned: bool = False          # residency pin propagated to synthesize + corpus skip
-    blocked: bool = False               # guard BLOCK or privacy-with-no-in-perimeter-model
-    block_reasons: list[str] = field(default_factory=list)
-    spans: list[dict] = field(default_factory=list)  # observability (e.g. the label span)
-
-
-def _list_name(query: str) -> str:
-    q = " ".join(query.split())
-    return (q[:57] + "…") if len(q) > 58 else (q or "toto session")
+__all__ = [
+    "Driver", "DriverResult", "Exec", "RouteDecision", "RouteState",
+    "CompleteFn", "StreamFn", "Observer", "MAX_DECOMPOSE_TASKS",
+]
 
 
 def _ls_enabled() -> bool:
@@ -240,7 +129,7 @@ class Driver:
         self.driver_model = driver_model
         self.triage_model = triage_model
         # Per-role output caps (role -> max_tokens). Empty = uncapped (backward-compatible for
-        # tests that build a Driver directly); app.py wires the Settings defaults in prod.
+        # tests that build a Driver directly); the app wires the Settings defaults in prod.
         self._max_tokens = max_tokens or {}
         # Streaming: when a stream_fn is wired, user-facing answers (answer_trivial/synthesize)
         # stream batched deltas to the run event plane via emit_delta. Absent → plain completion.
@@ -260,7 +149,7 @@ class Driver:
         # Experience-kNN proposer (dark; None = flag off → dispatch seam skipped, byte-identical).
         self._knn = knn
         # Label routing (LabelBindings; None = off → dispatch seam skipped, byte-identical).
-        # The classifier call runs on label_model, a catalog entry id validated in app.py.
+        # The classifier call runs on label_model, a catalog entry id validated at app build.
         self._labels = labels
         self._label_model = label_model
         self._label_timeout_ms = label_timeout_ms
@@ -273,7 +162,7 @@ class Driver:
         self._adapters = adapters or AdapterRegistry.default_gateway(complete_fn)
         self._graph = None  # lazily compiled LangGraph (graph.py), cached
 
-    # --- helpers -------------------------------------------------------------
+    # --- LLM calls: resilience, streaming, tracing ---------------------------
 
     async def _llm(self, model_id: str, messages: list[dict], *, name: str = "llm",
                    max_tokens: int | None = None, temperature: float | None = None) -> Exec:
@@ -281,34 +170,6 @@ class Driver:
                                     max_tokens=max_tokens, temperature=temperature)
         ex, _model, _note = await self._call(req, self._complete, name=name)
         return ex
-
-    async def _classify_label(self, text: str,
-                              custom: list[dict] | None = None) -> tuple[str | None, dict | None]:
-        """One haiku-class call → (verbatim vocab label, totoshape metadata), or (None, None) on ANY
-        failure. None label means the fallback ladder decides — the classifier being down is never
-        routing being down. Metadata is the totoshape classify block (None unless that variant is
-        live); it enriches the Toto task, never the routing decision.
-        Hard wall-clock cap: a HUNG provider must degrade to the fallback too, not stall the
-        sub-task for the SDK's default timeout while holding an _llm slot.
-
-        `custom` (CT) is the caller's team's invented task types [{name, desc, model}]. Their
-        {name: desc} entries are appended to the classifier vocabulary FOR THIS REQUEST — both the
-        LABEL_PROMPT enumeration and parse_label's accepted set — so the classifier can emit a
-        custom label. No custom labels -> byte-identical to the global-vocab call."""
-        labels = self._labels.labels
-        if custom:  # append team-invented {name: desc} onto the global vocab for this request only
-            labels = {**labels,
-                      **{c["name"]: {"desc": c.get("desc", "")} for c in custom if c.get("name")}}
-        try:
-            ex = await asyncio.wait_for(
-                self._llm(self._label_model,
-                          prompts.build_label_messages(text, labels),
-                          name="label.classify", temperature=0.0,
-                          max_tokens=self._max_tokens.get("triage")),
-                timeout=self._label_timeout_ms / 1000.0)
-            return prompts.parse_label(ex.text, sorted(labels)), prompts.parse_label_metadata(ex.text)
-        except Exception:
-            return None, None
 
     async def _answer(self, model_id: str, messages: list[dict], *, name: str, node: str,
                       max_tokens: int | None = None) -> Exec:
@@ -319,70 +180,7 @@ class Driver:
             return await self._llm(model_id, messages, name=name, max_tokens=max_tokens)
         req = ChatCompletionRequest(model=model_id, messages=[Message(**m) for m in messages],
                                     max_tokens=max_tokens)
-        ex, _model, _note = await self._call(req, lambda r: self._stream_run(r, node), name=name)
-        return ex
-
-    async def _stream_run(self, req: ChatCompletionRequest, node: str, gate=None) -> Exec:
-        """One streamed attempt with a FRESH batch buffer, so a retry/fallback restarts cleanly.
-        Stale deltas from a failed attempt stay in the event log but are superseded by the
-        terminal snapshot — the client swaps to authoritative text at run_done.
-
-        gate (companion agent only): a callable(prelude)->True/False/None that inspects the leading
-        text before anything is published — True to start streaming (plain answer), False to
-        suppress the whole reply (it's a tool call, parsed by the caller from the returned Exec),
-        None to keep buffering while ambiguous. Absent (driver answer nodes, which already know
-        the reply is an answer) → emit from the first delta as before."""
-        buf: list[str] = []
-        whole: list[str] = []   # full stream so far, for the mid-stream tool-call guard
-        last = [time.monotonic()]
-        emit = [gate is None]   # may we publish yet? (True immediately when there's no gate)
-        suppress = [False]      # gate ruled it a tool call → publish nothing, ever
-        frozen = [False]        # committed answer grew a trailing {"tool" object → stop emitting
-        seen_brace = [False]    # cheap gate: only scan for the tool object once a '{' appears
-
-        async def flush() -> None:
-            if not emit[0] or suppress[0]:
-                return
-            if buf:
-                r = self._emit_delta(node, "".join(buf))  # async publish (prod) or sync (tests)
-                if inspect.isawaitable(r):
-                    await r
-                buf.clear()
-                last[0] = time.monotonic()
-
-        async def on_delta(chunk: str) -> None:
-            if suppress[0] or frozen[0]:
-                return
-            whole.append(chunk)
-            buf.append(chunk)
-            if not emit[0]:
-                verdict = gate("".join(buf))
-                if verdict is False:
-                    suppress[0] = True
-                    buf.clear()
-                    return
-                if verdict is not True:
-                    return       # still ambiguous — hold the buffer, emit nothing
-                emit[0] = True   # decided: plain answer — the held buffer flushes below
-            # Mid-stream tool-call guard (gated companion path only): a committed answer that
-            # sprouts a trailing `{"tool" …}` object — the model narrated then appended the call.
-            # Emit only the clean prose up to the brace, then freeze so the JSON never streams.
-            if gate is not None and ("{" in chunk or seen_brace[0]):
-                seen_brace[0] = True
-                s = "".join(whole)
-                m = _TOOL_OBJ_RE.search(s)
-                if m is not None:
-                    already = len(s) - sum(len(x) for x in buf)  # chars already published
-                    buf[:] = [s[already:m.start()]] if already < m.start() else []
-                    await flush()
-                    frozen[0] = True
-                    return
-            if sum(len(x) for x in buf) >= self._delta_chars or \
-                    time.monotonic() - last[0] >= self._delta_secs:
-                await flush()
-
-        ex = await self._stream(req, on_delta)
-        await flush()  # emit the tail
+        ex, _model, _note = await self._call(req, lambda r: stream_run(self, r, node), name=name)
         return ex
 
     async def _answer_gated(self, model_id: str, messages: list[dict], *, name: str, node: str,
@@ -404,7 +202,7 @@ class Driver:
             return v
 
         ex, _model, _note = await self._call(
-            req, lambda r: self._stream_run(r, node, gate=g), name=name)
+            req, lambda r: stream_run(self, r, node, gate=g), name=name)
         return ex, streamed[0]
 
     async def _call(self, req: ChatCompletionRequest, run, *, name: str,
@@ -476,7 +274,7 @@ class Driver:
                     ("generation_id", ex.generation_id)) if v}
                 rt.end(
                     # usage_metadata in OUTPUTS is what LangSmith aggregates into the trace-level
-                    # token/cost columns (Decision 6.3) — metadata alone never rolls up.
+                    # token/cost columns — metadata alone never rolls up.
                     outputs={"content": ex.text,
                              "usage_metadata": {
                                  "input_tokens": ex.tokens_prompt or 0,
@@ -503,6 +301,8 @@ class Driver:
                          tokens_completion=ex.tokens_completion, tokens_cached=ex.tokens_cached,
                          cost_usd=ex.cost_usd, latency_ms=ex.latency_ms, name=name)
         return ex
+
+    # --- spans + Toto plumbing -----------------------------------------------
 
     async def _emit(self, node: str, **data: Any) -> dict:
         span = {"node": node, "ts": time.time(), **data}
@@ -536,6 +336,36 @@ class Driver:
             return configured  # already in-perimeter — no egress, keep it
         return _first_in_perimeter_model(self.catalog) or configured
 
+    # --- per-task routing (dispatch.py owns the bodies) ----------------------
+
+    def _effective_catalog(self) -> Catalog:
+        return effective_catalog_for(self)
+
+    async def _classify_label(self, text: str,
+                              custom: list[dict] | None = None) -> tuple[str | None, dict | None]:
+        """(label, metadata) or (None, None) on ANY failure — see dispatch.classify_label."""
+        return await classify_label(self, text, custom)
+
+    async def _decide_one(self, t: dict, *, optimize: str | None = None,
+                          pins: dict[str, str] | None = None, run_pinned: bool = False,
+                          label_pins: dict[str, str] | None = None,
+                          team_bindings: dict[str, str] | None = None,
+                          team_custom: list[dict] | None = None) -> RouteDecision:
+        """Pure routing decision for one task — `/v1/routing/decide` calls this directly."""
+        return await decide_one(self, t, optimize=optimize, pins=pins, run_pinned=run_pinned,
+                                label_pins=label_pins, team_bindings=team_bindings,
+                                team_custom=team_custom)
+
+    async def _dispatch_one(self, t: dict, optimize: str | None = None,
+                            pins: dict[str, str] | None = None, idx: int = 0,
+                            run_pinned: bool = False,
+                            label_pins: dict[str, str] | None = None,
+                            team_bindings: dict[str, str] | None = None,
+                            team_custom: list[dict] | None = None) -> list[dict]:
+        """Decide (pure) then execute one task — see dispatch.dispatch_one."""
+        return await dispatch_one(self, t, optimize, pins, idx, run_pinned,
+                                  label_pins, team_bindings, team_custom)
+
     # --- nodes ---------------------------------------------------------------
 
     async def triage(self, state: RouteState) -> dict:
@@ -548,6 +378,7 @@ class Driver:
             prompts.build_triage_messages(state["query"], history=state.get("history")),
             name="triage.llm", max_tokens=self._max_tokens.get("triage"))
         parsed = prompts.parse_triage(ex.text)
+        # Fail-safe parsing: anything but an explicit "trivial" routes multistep.
         kind = "trivial" if parsed.get("kind") == "trivial" else "multistep"
         span = await self._emit("triage", kind=kind, model=ex.model, reason=parsed.get("reason"),
                           cost=ex.cost_usd, tokens_prompt=ex.tokens_prompt,
@@ -606,7 +437,7 @@ class Driver:
                                               dropped=len(pre) - MAX_DECOMPOSE_TASKS))
             tasks = [dict(t) for t in pre[:MAX_DECOMPOSE_TASKS]]
             for t in tasks:
-                t["authored"] = True  # provenance: _dispatch_one stamps route_reason off this
+                t["authored"] = True  # provenance: dispatch stamps route_reason off this
             list_id, ids, s = await self._create_tasks(q, tasks, kind="multistep")
             spans += s
             for t, iid in zip(tasks, ids or [None] * len(tasks)):
@@ -619,6 +450,8 @@ class Driver:
         dmodel = self._reasoning_model(state, self.driver_model)
         ex = await self._llm(dmodel, prompts.build_decompose_messages(q, history=history),
                              name="decompose.llm", max_tokens=self._max_tokens.get("decompose"))
+        # Fail-safe parsing: parse_tasks drops malformed tasks; an empty parse gets one strict
+        # retry, then degrades to a single escalated task — never a crashed run.
         tasks = prompts.parse_tasks(ex.text)
         if not tasks:  # parser failed → one strict-JSON retry before degrading
             retry = await self._llm(
@@ -648,7 +481,7 @@ class Driver:
 
     async def dispatch(self, state: RouteState) -> dict:
         # Independent tasks run CONCURRENTLY — decomposition exists precisely to parallelize.
-        # Each _dispatch_one mutates only its own task dict and returns its own spans, so there
+        # Each dispatch_one mutates only its own task dict and returns its own spans, so there
         # are no shared writes; wall-clock ≈ the slowest single task, not the sum.
         # return_exceptions: one task crashing must never take down its siblings — the failed
         # task degrades to outcome=failed and synthesis proceeds with the survivors.
@@ -662,13 +495,13 @@ class Driver:
             prefs = prefs or {}
         except Exception:
             prefs = {}
-        # Team routing overlay (control-plane C6): the caller's team tag->model bindings + optimize
-        # preset, resolved server-side and carried on the request identity (effective_policy). Empty/
-        # None when the team has no routing policy, the caller is the operator, or this is an internal
+        # Team routing overlay: the caller's team tag->model bindings + optimize preset, resolved
+        # server-side and carried on the request identity (effective_policy). Empty/None when the
+        # team has no routing policy, the caller is the operator, or this is an internal
         # (no-identity) run → byte-identical global behavior. Read once here, threaded per task below.
         team_bindings: dict[str, str] = {}
         team_optimize: str | None = None
-        # Custom task types (CT): the team's invented labels [{name, desc, model}]. Their descs
+        # Custom task types: the team's invented labels [{name, desc, model}]. Their descs
         # expand the classifier vocab for THIS request (so the classifier can emit them); a match
         # routes to `model` at team-binding tier — folded into team_bindings below so the existing
         # binding-resolution ladder handles it (custom names can't collide with a builtin label —
@@ -694,11 +527,11 @@ class Driver:
         label_pins = prefs.get("label_models") or {}  # user's label->model overrides (Settings)
         # Run-level pin (raw-query guard DOWNGRADE_LOCAL) propagates to every sub-task: a
         # decomposed task that neither re-trips the guard nor carries data_policy=local must
-        # still stay in-perimeter, or its prompt_text leaks via embed/kNN/corpus/frontier (#29).
+        # still stay in-perimeter, or its prompt_text leaks via embed/kNN/corpus/frontier.
         run_pinned = bool(state.get("local_pinned"))
         span_groups = await asyncio.gather(
-            *(self._dispatch_one(t, optimize, pins, idx, run_pinned, label_pins, team_bindings,
-                                 team_custom)
+            *(dispatch_one(self, t, optimize, pins, idx, run_pinned, label_pins, team_bindings,
+                           team_custom)
               for idx, t in enumerate(tasks)),
             return_exceptions=True,
         )
@@ -712,269 +545,13 @@ class Driver:
                 spans.extend(group)
         # If ANY sub-task was pinned local (data_policy / per-task guard), raise the run-level
         # residency so synthesize reasons over the aggregated results on the local lane too —
-        # never egressing local-only output to frontier (#29). No flagged task → key absent →
+        # never egressing local-only output to frontier. No flagged task → key absent →
         # frontier as before (byte-identical). A flagged task passed the per-task no-local-lane
         # gate, so the raised flag never makes synthesize's _reasoning_model fall open to frontier.
         out: dict = {"tasks": tasks, "spans": spans}
         if any(t.get("local_pinned") for t in tasks):
             out["local_pinned"] = True
         return out
-
-    async def _emit_task_block(self, t: dict, reasons: list[str]) -> list[dict]:
-        """Finalize a task the residency gate refused (MNPI egress, or local-required-but-no-local-lane):
-        mark it blocked, emit the guard_block span, and write Toto status/exec. Never dispatches."""
-        spans: list[dict] = []
-        t.update(
-            blocked=True, lane=None, model_id=None, result=None,
-            execution={"outcome": "blocked_constraints", "route_reason": "; ".join(reasons)},
-        )
-        spans.append(await self._emit("guard_block", task=t.get("task"), reasons=reasons))
-        if t.get("item_id"):
-            _, s = await self._toto(lambda: self.toto.set_status(t["item_id"], "done"), "status")
-            spans += s
-            _, s = await self._toto(lambda: self.toto.write_execution(t["item_id"], t["execution"]), "exec")
-            spans += s
-        return spans
-
-    def _effective_catalog(self) -> Catalog:
-        """Base catalog + the current caller's adoptions (catalog-adoption). The driver runs inside
-        the request context, so current_identity() carries the caller resolved at auth (None for
-        internal/test runs → base unchanged). This lets the driver's OWN selection — classify, label
-        bindings, user pins — pick an adopted model, matching the gateway dispatch choke point.
-        Cheap: no adoptions → returns `self.catalog` itself."""
-        from ..routes.deps import current_identity
-        return effective_catalog(self.catalog, current_identity())
-
-    async def _decide_one(self, t: dict, *, optimize: str | None = None,
-                          pins: dict[str, str] | None = None, run_pinned: bool = False,
-                          label_pins: dict[str, str] | None = None,
-                          team_bindings: dict[str, str] | None = None,
-                          team_custom: list[dict] | None = None) -> RouteDecision:
-        """The pure routing decision for one task — guard → residency → classify → label → kNN →
-        pin → residency re-check. No dispatch, no Toto writes: `_dispatch_one` executes the result,
-        `/v1/routing/decide` serializes it. May emit the label span (observability only)."""
-        spans: list[dict] = []
-        md = t.get("metadata") or {}
-        catalog = self._effective_catalog()  # selection resolves adopted models too (catalog-adoption)
-        prompt_text = f"{t.get('task', '')}\n\n{t.get('description', '')}".strip()
-        probe = ChatCompletionRequest(
-            model=self.driver_model, messages=[Message(role="user", content=prompt_text)]
-        )
-
-        # GUARD (fail-closed) — per task, before any executor OR embedding sees it.
-        verdict = self.guard.check(probe, Signal())
-        if verdict.action == BLOCK:
-            return RouteDecision(None, [], None, blocked=True,
-                                 block_reasons=verdict.reasons, spans=spans)
-
-        # RESIDENCY decided on the RAW task BEFORE any external call: data_policy (cheap,
-        # side-effect-free) or a guard downgrade both pin the work local. Nothing sensitive may
-        # leave the perimeter as a side effect of deciding how to route it (#29).
-        data_policy = (md.get("requires") or {}).get("data_policy")
-        local_pinned = (data_policy in {"local_only", "local"}
-                        or verdict.action == DOWNGRADE_LOCAL or run_pinned)
-        # FAIL CLOSED: pinned in-perimeter but no in-perimeter model exists → block, never fall to frontier (#20).
-        if local_pinned and _first_in_perimeter_model(self.catalog) is None:
-            return RouteDecision(
-                None, [], None, local_pinned=True, blocked=True,
-                block_reasons=["privacy: in-perimeter handling required, no in-perimeter model available"],
-                spans=spans)
-        # Surface residency so the dispatch node can raise the run-level pin: otherwise synthesize
-        # aggregates this local-only OUTPUT and egresses it to the frontier driver_model (#29
-        # residual). Set AFTER the gate above → a flagged task provably has a local lane, so the
-        # raised state flag can never make _reasoning_model fall open to frontier.
-        t["local_pinned"] = local_pinned
-
-        # SKILL: embedding nearest-centroid when enabled AND egress is permitted, else keyword.
-        # Local-pinned text is never POSTed to the external embedder — degrade to the keyword
-        # classifier (the exact embedder-is-None path).
-        skill_override = None
-        if self._embed_routing and self._embedder is not None and not local_pinned:
-            skill_override = await self._embedder.infer_skill(prompt_text)
-        # CLASSIFY metadata → executor; guard downgrade_local overrides toward local.
-        dec = classify(md, catalog, self.benchmarks, optimize, skill=skill_override)
-        rejected = list(dec.rejected)  # benchmark losers; override paths append the displaced pick
-        if self._embed_routing:  # only annotate when the flag is on → flag-off is byte-identical
-            dec = TaskDecision(dec.lane, dec.tools_required, dec.model_id,
-                               dec.reason + f"; skill:{'embed' if skill_override else 'keyword'}",
-                               dec.skill)
-        # LABEL ROUTING: haiku classifier → closed-set label → labels.yaml binding displaces the
-        # benchmark pick (lane AND model — the binding sets the tier). Pinned text never egresses
-        # (same gate as the embedder above). Any miss — no/unknown/unbound label — leaves the
-        # classify() pick standing; kNN, pins, and the residency re-check below still apply on top.
-        label = None
-        label_metadata = None
-        user_bound = None
-        team_bound = None
-        if self._labels is not None and not local_pinned:
-            # CT: team_custom expands the classifier vocab for this request (its bound models were
-            # folded into team_bindings in dispatch, so a custom classification routes below).
-            label, label_metadata = await self._classify_label(prompt_text, team_custom)
-            # Binding precedence for a classified label: a user's Settings override wins, then the
-            # TEAM overlay (control-plane C6, admin config), then the shipped labels.yaml default.
-            # A label the team didn't set falls through to the global default; another team gets the
-            # global default. All ids PUT-validated against the catalog; a stale id (since left the
-            # catalog) falls through to the next tier — .get() on an unknown id returns None.
-            user_bound = catalog.get((label_pins or {}).get(label) or "") if label else None
-            team_bound = catalog.get((team_bindings or {}).get(label) or "") if label else None
-            bound = (user_bound or team_bound
-                     or (catalog.get(self._labels.model_for(label) or "") if label else None))
-            if bound is not None:
-                rejected.append({"model_id": dec.model_id, "reason": "label binding outbid benchmarks"})
-                origin = ":user" if user_bound else (":team" if team_bound else "")
-                dec = TaskDecision(bound.lane, dec.tools_required, bound.id,
-                                   f"label:{label}{origin}", dec.skill)
-            else:
-                dec = TaskDecision(dec.lane, dec.tools_required, dec.model_id,
-                                   dec.reason + f"; label:{label or 'none'}:fallback", dec.skill)
-            spans.append(await self._emit("label", task=t.get("task"), label=label,
-                                          model=self._label_model,
-                                          bound=bound.id if bound is not None else None))
-        # EXPERIENCE-kNN: similar past tasks propose a model, overriding the benchmark pick within
-        # the decided lane. Skipped for privacy lanes (privacy > kNN), for an EXPLICIT label binding
-        # — a user's OR the team's (control-plane C6) — since that is deliberate intent (same
-        # authority as pins), and yields to the pin below (pins > kNN). None when flag off / sparse
-        # neighbors → prior stays.
-        if self._knn is not None and not local_pinned and user_bound is None and team_bound is None:
-            prop = await self._knn.propose(prompt_text, dec.lane)
-            if prop is not None:
-                rejected.append({"model_id": dec.model_id, "reason": "knn outvoted"})
-                dec = TaskDecision(dec.lane, dec.tools_required, prop.model_id,
-                                   dec.reason + f"; {prop.reason}", dec.skill)
-        # User pin for this skill overrides the benchmark pick — but never a privacy lane
-        # (data_policy pins beat user pins), and the guard downgrade below still beats both.
-        pin = (pins or {}).get(dec.skill)
-        if pin and not local_pinned:
-            entry = catalog.get(pin)
-            if entry is not None:
-                rejected.append({"model_id": dec.model_id, "reason": "pin override"})
-                dec = TaskDecision(entry.lane, dec.tools_required, entry.id,
-                                   dec.reason + "; pin:user", dec.skill)
-        # Egress/privacy guard keys off RESIDENCY, not tier: when the run is pinned local
-        # (local_pinned — propagated from the raw-query DOWNGRADE_LOCAL guard, main's egress-residual
-        # hardening), keep this sub-task in-perimeter unless it already is, landing on an in-perimeter
-        # model (never a cheap CLOUD one).
-        cur = catalog.get(dec.model_id)
-        if local_pinned and (cur is None or cur.residency_class != "in_perimeter"):
-            perim = _first_in_perimeter_model(self.catalog)  # local models only — base catalog
-            if perim:
-                entry = catalog.get(perim)
-                rejected.append({"model_id": dec.model_id, "reason": "privacy guard: downgrade_local"})
-                dec = TaskDecision(entry.lane, dec.tools_required, perim,
-                                   dec.reason + "; guard: downgrade_local", dec.skill)
-
-        return RouteDecision(dec, rejected, label, local_pinned=local_pinned, spans=spans,
-                             label_metadata=label_metadata)
-
-    async def _dispatch_one(self, t: dict, optimize: str | None = None,
-                            pins: dict[str, str] | None = None, idx: int = 0,
-                            run_pinned: bool = False,
-                            label_pins: dict[str, str] | None = None,
-                            team_bindings: dict[str, str] | None = None,
-                            team_custom: list[dict] | None = None) -> list[dict]:
-        # DECIDE (pure) then EXECUTE — the decision is the same function /v1/routing/decide exposes.
-        rd = await self._decide_one(t, optimize=optimize, pins=pins, run_pinned=run_pinned,
-                                    label_pins=label_pins, team_bindings=team_bindings,
-                                    team_custom=team_custom)
-        spans: list[dict] = list(rd.spans)
-        if rd.blocked:
-            return spans + await self._emit_task_block(t, rd.block_reasons)
-        dec, rejected, label, local_pinned = rd.dec, rd.rejected, rd.label, rd.local_pinned
-        if t.get("authored"):  # orchestrator-authored task: provenance stamp. APPENDED, never
-            # prefixed — _privacy_pinned keys off the head of the reason string.
-            dec.reason += "; orchestrator:authored"
-        classified = rd.label_metadata  # totoshape metadata → stamped onto the Toto item at write-back
-        md = t.get("metadata") or {}
-        # RESIDENCY × RUNNER (fail-closed, BEFORE any spawn): an in-perimeter decision — local
-        # pin, data_policy, guard downgrade — must never execute on claude_code, which egresses
-        # to Anthropic directly, outside the gateway's residency enforcement. The decision
-        # object knows the pin; the adapter alone never would. pi is exempt: its completions
-        # come back THROUGH this gateway, which enforces residency itself.
-        if local_pinned and (md.get("requires") or {}).get("runner") == "claude_code":
-            return spans + await self._emit_task_block(t, [
-                "privacy: in-perimeter handling required; runner claude_code egresses to Anthropic"])
-        prompt_text = f"{t.get('task', '')}\n\n{t.get('description', '')}".strip()
-
-        if t.get("item_id"):
-            _, s = await self._toto(lambda: self.toto.set_status(t["item_id"], "in_progress"), "status")
-            spans += s
-
-        exreq = ChatCompletionRequest(
-            model=dec.model_id,
-            messages=[Message(role="system", content=prompts.EXECUTOR_PROMPT),
-                      Message(role="user", content=prompt_text)],
-            max_tokens=self._max_tokens.get("dispatch"),
-        )
-        # The classifier chose the model; the adapter registry chooses the harness (default:
-        # gateway; a task can pin claude_code/pi via metadata.requires.runner). _call adds
-        # provider retry + fallback (honoring the residency/privacy boundary) and traces each try.
-        try:
-            ex, final_model, note = await self._call(
-                exreq, lambda r: self._adapters.run(r, md),
-                name=f"dispatch:{dec.model_id}",
-                route_meta={"route_reason": dec.reason, "skill": dec.skill, "lane": dec.lane,
-                            "task": t.get("task"),
-                            **({"label": label} if self._labels is not None else {})},
-                privacy=_privacy_pinned(dec.reason),
-            )
-        except Exception as exc:  # executor died after retries+fallback (provider, stub, timeout)
-            err = f"{type(exc).__name__}: {exc}"
-            t.update(
-                lane=dec.lane, model_id=dec.model_id, tools_required=dec.tools_required,
-                result=None,
-                execution={"outcome": "failed", "lane": dec.lane, "model": dec.model_id,
-                           "route_reason": dec.reason, "error": err},
-            )
-            spans.append(await self._emit("dispatch_error", task=t.get("task"),
-                                    model=dec.model_id, error=err))
-            if t.get("item_id"):
-                _, s = await self._toto(lambda: self.toto.set_status(t["item_id"], "done"), "status")
-                spans += s
-                _, s = await self._toto(
-                    lambda: self.toto.write_execution(t["item_id"], t["execution"], classified), "exec")
-                spans += s
-            return spans
-
-        # Record the model that ACTUALLY ran (fallback may have switched it), with the reason noted.
-        final_entry = self._effective_catalog().get(final_model)  # adopted models carry their lane too
-        final_lane = final_entry.lane if final_entry else dec.lane
-        reason = dec.reason + (f"; {note}" if note else "")
-        execution = {
-            "runner": ex.adapter or "gateway", "executor": ex.model, "lane": final_lane,
-            "model": final_model, "tokens_prompt": ex.tokens_prompt,
-            "tokens_completion": ex.tokens_completion, "tokens_cached": ex.tokens_cached,
-            "cost_usd": ex.cost_usd,
-            "outcome": "completed", "latency_ms": ex.latency_ms, "route_reason": reason,
-            # Typed receipt (hash only, never a copy of the answer) + who lost the routing bid.
-            "artifact": make_artifact("task_result", ex.text, produced_by=final_model,
-                                      evidence=[final_lane, dec.skill], confidence=None),
-            "rejected": rejected,
-        }
-        t.update(
-            lane=final_lane, model_id=final_model, tools_required=dec.tools_required, result=ex.text,
-            skill=dec.skill, execution=execution,
-        )
-        residency = final_entry.residency_class if final_entry else "frontier"
-        t["residency"] = residency
-        spans.append(await self._emit("dispatch", task=t.get("task"), lane=final_lane, model=final_model,
-                                cost=ex.cost_usd, reason=reason, skill=dec.skill,
-                                residency=residency, tokens_prompt=ex.tokens_prompt,
-                                tokens_cached=ex.tokens_cached,
-                                sha256=execution["artifact"]["sha256"], n_rejected=len(rejected)))
-        if t.get("item_id"):
-            _, s = await self._toto(lambda: self.toto.set_status(t["item_id"], "done"), "status")
-            spans += s
-            _, s = await self._toto(
-                lambda: self.toto.write_execution(t["item_id"], t["execution"], classified), "exec")
-            spans += s
-        # Experience corpus (groundwork) — fire-and-forget, never blocks or breaks the run.
-        # Skipped for local-pinned tasks: their prompt_text must not be embedded externally
-        # (app.py's sink POSTs it) nor persisted to task_embeddings.
-        if self._corpus_sink is not None and not local_pinned:
-            asyncio.create_task(_safe_corpus(
-                self._corpus_sink, str(idx), prompt_text, dec.skill, final_model,
-                "completed", ex.cost_usd, ex.latency_ms))
-        return spans
 
     async def synthesize(self, state: RouteState) -> dict:
         q = state["query"]
@@ -999,8 +576,8 @@ class Driver:
 
     async def revise_card(self, prev_summary: str, new_result: str) -> str:
         """One LLM call per continued turn: merge the prior session card summary with the new
-        turn's result into a single revised summary (Dayflow's continuity contract — revise the
-        draft, don't append). Not streamed — it's a background artifact, not a user-facing answer."""
+        turn's result into a single revised summary (revise the draft, don't append). Not
+        streamed — it's a background artifact, not a user-facing answer."""
         ex = await self._llm(self.driver_model,
                              persona.build_revise_messages(prev_summary, new_result),
                              name="revise.llm", max_tokens=self._max_tokens.get("synthesize"))
@@ -1053,15 +630,15 @@ class Driver:
 
         # EGRESS GATE (fail-closed) on the RAW query, BEFORE build_graph/triage — the driver's own
         # reasoning nodes (triage/decompose/answer_trivial/synthesize) call frontier ungated, and
-        # the trivial path never reaches the per-task guard at all (#5/#15). BLOCK → refuse the run;
-        # a guard downgrade pins every reasoning node local (or blocks if no in-perimeter model exists, #20).
+        # the trivial path never reaches the per-task guard at all. BLOCK → refuse the run; a
+        # guard downgrade pins every reasoning node local (or blocks if no in-perimeter model exists).
         verdict = self.guard.check(
             ChatCompletionRequest(model=self.driver_model,
                                   messages=[Message(role="user", content=query)]), Signal())
         if verdict.action == BLOCK:
             return await self._blocked_result(query, verdict.reasons)
         local_pinned = verdict.action == DOWNGRADE_LOCAL
-        # Authored tasks descend from NOTHING gated (on main every task descended from the gated
+        # Authored tasks descend from NOTHING gated (a decomposed task descends from the gated
         # query): their text reaches Toto/classify/executors directly, so gate each one exactly
         # like the raw query BEFORE the graph — BLOCK refuses the whole run, DOWNGRADE_LOCAL pins
         # the run local. Fail-closed, before _create_tasks can egress a byte.

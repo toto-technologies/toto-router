@@ -1,14 +1,13 @@
-"""The dispatch core (context doc §7.1, Phase-0 slice).
+"""The dispatch core: every completion, streaming or not, flows through Gateway.complete/stream.
 
-ingest -> catalog resolve -> dispatch via Runner -> tee response -> account -> trace.
+ingest -> smart resolve -> plan (guard/policy) -> dispatch via Runner -> account -> trace.
 
-No routing intelligence: the lane is whatever the catalog says for the requested model. The
-value Phase 0 proves lives in the accounting + trace, not the decision. Two concerns are kept
-rigorously correct here because nothing downstream can fix them later:
+Two concerns are kept rigorously correct here because nothing downstream can fix them later:
 
-  1. Usage/cost accounting — prefer upstream-reported usage; estimate + flag otherwise.
+  1. Usage/cost accounting — prefer upstream-reported usage; estimate + flag otherwise
+     (`cost_estimated` stays honest).
   2. Routing tax — `latency_ms_gateway_overhead` = total wall minus the upstream's own wall,
-     so we measure exactly what the gateway adds (guardrail #3).
+     so we measure exactly what the gateway adds.
 """
 
 from __future__ import annotations
@@ -78,7 +77,7 @@ class StreamStallError(Exception):
 
 
 class GatewayDegradedError(Exception):
-    """W1-C1: a smart-routing degradation happened (classify_failed | policy_error | breaker_open)
+    """A smart-routing degradation happened (classify_failed | policy_error | breaker_open)
     and the caller's org fail_policy is 'closed' — reject with 503 instead of serving the failure
     floor. `reason` is the degraded_mode string; the route handler renders it in the error body."""
 
@@ -88,7 +87,7 @@ class GatewayDegradedError(Exception):
 
 
 class BudgetExceededError(Exception):
-    """W2-C5: the caller's team/org monthly budget is over 100% and its action is 'reject'. The
+    """The caller's team/org monthly budget is over 100% and its action is 'reject'. The
     route handler renders a 402 budget_exceeded body; the gateway already wrote the trace row
     (status=error, budget_state=rejected), mirroring the fail-closed degraded trace."""
 
@@ -114,7 +113,7 @@ def _conversation_key(messages) -> str | None:
 
 
 def _declared_key(value: str | None) -> str | None:
-    """A client-declared session identity (S3) → the `declared:<hash>` conversation_key that
+    """A client-declared session identity → the `declared:<hash>` conversation_key that
     overrides the message fingerprint, so every turn the client tags with the same session id
     anchors on ONE memo entry (a long, eager hold). None when nothing was declared."""
     if not value:
@@ -174,8 +173,8 @@ class Gateway:
     ) -> None:
         self.catalog = catalog
         self.candidates = candidates or CandidateCatalog()
-        # W2-C5: team/org monthly budget enforcer. None (tests, driver-internal, no auth store) →
-        # no budget check, today's behavior. app.py sets it after the AuthStore exists.
+        # Team/org monthly budget enforcer. None (tests, driver-internal, no auth store) →
+        # no budget check. The app factory sets it after the AuthStore exists.
         self.budget = None
         self._eligibility = EligibilityEngine()
         self.registry = registry
@@ -188,7 +187,7 @@ class Gateway:
         # loop-agnostic until first await (3.10+), so building it here (no loop yet) is safe.
         self._llm_sem = asyncio.Semaphore(max_concurrent_llm) if max_concurrent_llm > 0 else None
         self._max_llm = max_concurrent_llm  # cap kept so gw_llm_semaphore_inflight = cap - available
-        # Passthrough-plane resilience (P3): same-model retry + residency-bounded fallback, shared
+        # Passthrough-plane resilience: same-model retry + residency-bounded fallback, shared
         # with the driver via resilience.py. Only engaged when a caller passes resilient=True
         # (routes/chat.py) — the driver plane owns its own retry in Driver._call, so its
         # gateway.complete calls stay resilient=False (no double stack).
@@ -196,23 +195,23 @@ class Gateway:
         self._backoff_base = backoff_base
         self._backoff_cap = backoff_cap
         self._passthrough_fallback = passthrough_fallback
-        # Stream stall / first-token deadline (P5): abandon a stream whose next chunk doesn't
+        # Stream stall / first-token deadline: abandon a stream whose next chunk doesn't
         # arrive within this budget, instead of holding the slot for the full read timeout.
         self._stall_timeout = stream_stall_timeout
-        # Per-provider circuit breaker (P4): keyed by base_url host, in-process per replica. Only
+        # Per-provider circuit breaker: keyed by base_url host, in-process per replica. Only
         # consulted on the resilient (passthrough) path — the driver plane owns its own resilience.
-        # breaker_redis (Wave 2 R1): optional redis.asyncio client → cross-replica shared OPEN state
+        # breaker_redis: optional redis.asyncio client → cross-replica shared OPEN state
         # (peers fast-fail together). None → in-process per-replica, exactly as before.
         self._breaker = CircuitBreaker(fail_threshold=breaker_fail_threshold,
                                        reset_seconds=breaker_reset_seconds, redis=breaker_redis)
         # Optional span sink for breaker transitions (circuit_open/circuit_close). No-op by default.
         self._observe = observe or (lambda span: None)
-        # Phase 1 decision pipeline. Defaults reproduce exact Phase-0 behaviour.
+        # Decision pipeline hooks. The defaults reproduce plain passthrough behaviour exactly.
         self.extractor = extractor or NoExtractor()
         self.guard = guard or AllowGuard()
         self.router = router or CatalogRouter()
         self.cache = cache or NoCache()
-        # Smart auto-routing (SR1): the `smart` sentinel model classifies the request and picks a
+        # Smart auto-routing: the `smart` sentinel model classifies the request and picks a
         # model per the team's label bindings. Requires the classifier model (or-haiku-4.5 on the
         # deploy) in the catalog; does NOT require the driver — the gateway makes the classify call
         # itself, straight on the runner. labels=None (label routing off / soft-disabled) → smart
@@ -221,13 +220,13 @@ class Gateway:
         self._benchmarks = benchmarks
         self._classifier_model = classifier_model
         self._label_timeout_ms = label_timeout_ms
-        # Stickiness policy (S1): governs the label memo's per-conversation hold. None → the flat
-        # sliding TTL, byte-for-byte as before; app.py wires SlidingTTL() as the explicit default.
+        # Stickiness policy: governs the label memo's per-conversation hold. None → the flat
+        # sliding TTL; the app factory wires SlidingTTL() as the explicit default.
         self._stick = stick
-        # Optional Redis L2 for the label memo (S4): cross-replica sharing of the classification.
+        # Optional Redis L2 for the label memo: cross-replica sharing of the classification.
         # Same client as the breaker; None → per-replica L1 only. Fail-open on any Redis error.
         self._memo_redis = memo_redis
-        # TTL-aware incumbent hold (chunk B): when True, smart_route keeps a conversation's warm
+        # TTL-aware incumbent hold: when True, smart_route keeps a conversation's warm
         # model over a fresh pick while its provider prefix cache is live. False → fresh every turn.
         self._warmth_routing = warmth_routing
 
@@ -262,13 +261,15 @@ class Gateway:
         default — but never classifies."""
         return self._labels is not None and self.catalog.get(self._classifier_model) is not None
 
+    # --- smart routing & planning --------------------------------------------
+
     async def _classify_text(self, messages: list[dict], model_id: str, max_tokens: int = 200,
                              *, identity=None) -> str:
         """One classifier call, straight on the runner — NOT through complete(), so it writes no
         trace and never appears as a user-facing turn. Caller guarantees model_id is in the catalog.
         `max_tokens` defaults to the classifier's 200; analytics insights pass more for prose.
 
-        W3-C1: resolves against the CALLER's effective catalog (base + their adoptions) so an
+        Resolves against the CALLER's effective catalog (base + their adoptions) so an
         org-adopted model can BE the classifier. `identity=None` (operator/analytics) → the base
         catalog, unchanged. The caller (smart_route) already gates on the effective catalog before
         dispatching here, so an absent classifier degrades to classify_failed rather than raising."""
@@ -295,8 +296,8 @@ class Gateway:
         text = next((m.text() for m in reversed(req.messages) if m.role == "user"), "")
         conv_key = getattr(req, "conversation_key", None)
         catalog = self.catalog_for(identity)  # base + caller adoptions — adopted ids are selectable here
-        require_tools = bool(getattr(req, "tools", None))  # SR2: tools-bearing → tool-capable model
-        # W1-C1: a routing-policy-engine error degrades to the benchmark default (policy=None); the
+        require_tools = bool(getattr(req, "tools", None))  # tools-bearing → tool-capable model
+        # A routing-policy-engine error degrades to the benchmark default (policy=None); the
         # reason rides the SmartResult so complete()/stream() can fail-closed on it if the org asks.
         try:
             policy = effective_policy(identity)
@@ -305,17 +306,17 @@ class Gateway:
                 smart.fallback_model(catalog, self._benchmarks, None, require_tools),
                 "smart:policy_error", None)
             return req.model_copy(update={"model": result.model_id}), result
-        # Warmth routing is a per-request knob (A8): the caller's org/team cache policy overrides the
+        # Warmth routing is a per-request knob: the caller's org/team cache policy overrides the
         # global default when it names `warmth_routing`, else the gateway-wide flag stands.
         pol_wr = (getattr(policy, "cache", None) or {}).get("warmth_routing")
         warmth_routing = self._warmth_routing if pol_wr is None else bool(pol_wr)
-        taxonomy = getattr(policy, "taxonomy", None) or None  # W2-C7: rides the one classify call
-        # W3-C1: the org's chosen classifier wins over the gateway default. classify_fn carries the
+        taxonomy = getattr(policy, "taxonomy", None) or None  # rides the one classify call
+        # The org's chosen classifier wins over the gateway default. classify_fn carries the
         # identity so _classify_text resolves the id against the caller's effective catalog (adoptions).
         classifier_model = getattr(policy, "classifier_model", None) or self._classifier_model
         classify_fn = lambda msgs, mid: self._classify_text(msgs, mid, identity=identity)  # noqa: E731
         if self._labels is None:  # label routing off/soft-disabled → benchmark default, still answers
-            # W2-C7 small-fix 8a: a DISTINCT reason for the labels-off deploy path, so _smart_degraded
+            # A DISTINCT reason for the labels-off deploy path, so _smart_degraded
             # never conflates it with a genuine classify failure (labels-off is config, not degradation).
             result = smart.SmartResult(
                 smart.fallback_model(catalog, self._benchmarks, policy, require_tools),
@@ -332,7 +333,7 @@ class Gateway:
         return req.model_copy(update={"model": result.model_id}), result
 
     async def _resolve_data_policy(self, req: ChatCompletionRequest, identity, smart):
-        """(data_label, constraint) for the org's data-classification taxonomy (W2-C7), or (None,
+        """(data_label, constraint) for the org's data-classification taxonomy, or (None,
         None) when the org configured none (zero overhead — the common case). The constraint is
         'local_only' | 'deny' | None.
 
@@ -354,7 +355,7 @@ class Gateway:
             data_label = smart.data_label
         elif self.smart_enabled:  # explicit model + taxonomy org → classify for the data label
             text = next((m.text() for m in reversed(req.messages) if m.role == "user"), "")
-            # W3-C1: same org classifier + caller-catalog binding as the smart path.
+            # Same org classifier + caller-catalog binding as the smart path.
             classifier_model = getattr(policy, "classifier_model", None) or self._classifier_model
             classify_fn = lambda msgs, mid: self._classify_text(msgs, mid, identity=identity)  # noqa: E731
             try:
@@ -373,11 +374,11 @@ class Gateway:
         return data_label, policy.taxonomy_constraint(data_label)
 
     def _cache_prefs(self, identity) -> dict:
-        """The resolved cache auto-inject knobs for this request (A8): the caller's org/team cache
+        """The resolved cache auto-inject knobs for this request: the caller's org/team cache
         policy wins per-field over the global env default. Stamped on the request so runners read
         auto-inject prefs off getattr(req, "cache_prefs") without importing identity/settings. A
-        field the policy doesn't name inherits the global default; no policy at all → pure globals
-        (byte-identical to pre-A8). Warmth routing is resolved separately in _resolve_smart (it's a
+        field the policy doesn't name inherits the global default; no policy at all → pure globals.
+        Warmth routing is resolved separately in _resolve_smart (it's a
         smart-route input, not a runner one)."""
         from .config import get_settings
 
@@ -396,7 +397,7 @@ class Gateway:
               ) -> tuple[CatalogEntry, Signal, Decision, str, ChatCompletionRequest]:
         """Run the decision pipeline: (catalog-policy substitute) -> extract -> guard -> route ->
         resolve -> (catalog-policy permit). `identity` feeds effective_policy so routing honors the
-        team's catalog allow/deny overlay (C2); no overlay → effective_policy returns None → the
+        team's catalog allow/deny overlay; no overlay → effective_policy returns None → the
         router uses its global policy, unchanged. Returns the (possibly substituted) req so both
         the passthrough and driver planes dispatch exactly the model that was permitted.
 
@@ -404,7 +405,7 @@ class Gateway:
         route through Gateway.complete/stream → here), so the fail-closed 403 is enforced once."""
         policy = effective_policy(identity)
         catalog = self.catalog_for(identity)  # base + caller adoptions (catalog-adoption)
-        # default_model substitution: a caller who omits `model` gets the team default (C2). Applied
+        # default_model substitution: a caller who omits `model` gets the team default. Applied
         # BEFORE planning so the default is what routes, is guarded, and is dispatched.
         if policy is not None and getattr(policy, "default_model", None) and not (req.model or "").strip():
             req = req.model_copy(update={"model": policy.default_model})
@@ -412,7 +413,7 @@ class Gateway:
         verdict = self.guard.check(req, signal)
         if verdict.action == BLOCK:
             raise BlockedError(verdict.reasons)
-        # W2-C7 data-classification enforcement at the routing FLOOR — holds for smart AND explicit
+        # Data-classification enforcement at the routing FLOOR — holds for smart AND explicit
         # models (the resolved/requested model is what routes through here). `local_only` reuses the
         # guard's DOWNGRADE_LOCAL machinery (residency floor → first in-perimeter model), so an
         # explicit frontier model on restricted data lands local. `deny` is rejected earlier, before
@@ -422,7 +423,7 @@ class Gateway:
                                    reasons=[f"data_policy:local_only:{data_label}"])
         decision = self.router.decide(req, signal, verdict, catalog, policy=policy)
         entry = self.resolve(decision.model_id, identity)
-        # W1-C3 org allowlist gate: deny-by-default at the ORG level, checked on the RESOLVED model
+        # Org allowlist gate: deny-by-default at the ORG level, checked on the RESOLVED model
         # BEFORE provider eligibility so an unapproved model surfaces a clean model_not_permitted
         # 403 (ask-your-admin) instead of a generic ineligibility. This is the same predicate
         # Policy.permits folds in, so the smart path already routes candidate selection AROUND
@@ -456,6 +457,8 @@ class Gateway:
             raise ModelNotPermittedError(entry.id)
         return entry, signal, decision, verdict.action, req
 
+    # --- accounting & trace stamps -------------------------------------------
+
     def _baseline(self, usage: Usage) -> float | None:
         ref = self.catalog.frontier_reference()
         return compute_cost_usd(ref, usage) if ref else None
@@ -480,14 +483,14 @@ class Gateway:
             task_id=task_id,
             org_id=getattr(identity, "org_id", None),
             team_id=getattr(identity, "team_id", None),
-            user_id=getattr(identity, "user_id", None),  # analytics A1 (label derived at finalize)
+            user_id=getattr(identity, "user_id", None),  # analytics label derived at finalize
             identity_id=entry.identity_id,
             offer_id=entry.offer_id,
             provider=entry.provider,
             upstream_model=entry.effective_upstream_model if entry.lane == "provider" else None,
             credential_scope=entry.credential_scope_label,
         )
-        # W3-C3: the escalation signal for THIS request, from the x-toto-escalated-from header the
+        # The escalation signal for THIS request, from the x-toto-escalated-from header the
         # middleware validated onto the contextvar. Read here (not passed) so every trace path —
         # normal, cache-hit, blocked, denied, degraded — and every surface records it identically.
         record.escalated_from = escalated_from_var.get()
@@ -501,7 +504,7 @@ class Gateway:
         trace.cost_usd = compute_cost_usd(entry, usage)
         trace.cost_estimated = estimated
         trace.frontier_baseline_usd = self._baseline(usage)
-        # Conversation warmth stat (S4): in-memory only, read by WarmthHold at assess on the next
+        # Conversation warmth stat: in-memory only, read by WarmthHold at assess on the next
         # turn. This is the single accounting choke point (complete + stream both land here).
         from .routing import smart
 
@@ -511,9 +514,11 @@ class Gateway:
                         data_label: str | None = None) -> None:
         trace.route_reason = decision.reason
         trace.guard_action = guard_action
-        trace.data_label = data_label  # W2-C7: the org data classification (None when no taxonomy)
+        trace.data_label = data_label  # the org data classification (None when no taxonomy)
         trace.signal_intent = signal.intent if signal.intent != "unknown" else None
         trace.signal_complexity = signal.complexity if signal.complexity != "unknown" else None
+
+    # --- denial trace rows ---------------------------------------------------
 
     def _blocked_trace(self, req, *, request_id, stream, harness, task_id, t0, exc,
                        identity=None) -> TraceRecord:
@@ -554,7 +559,7 @@ class Gateway:
 
     def _data_denied_trace(self, req, *, request_id, stream, harness, task_id, t0, data_label,
                            identity=None) -> TraceRecord:
-        """Provenance for a W2-C7 data-policy 403 (deny constraint): no upstream call is made, but the
+        """Provenance for a data-policy 403 (deny constraint): no upstream call is made, but the
         trace row is written carrying the data_label + a data_policy_denied reason, so the denial is
         auditable exactly like a served request."""
         entry = self.resolve(req.model, identity)
@@ -568,7 +573,7 @@ class Gateway:
         self._finalize(trace, t0, upstream_s=0.0)
         return trace
 
-    # --- fail-policy (W1-C1) -------------------------------------------------
+    # --- fail-policy ---------------------------------------------------------
 
     def _smart_degraded(self, smart) -> str | None:
         """The degradation reason for a smart-routing SmartResult, or None. A request served by a
@@ -587,7 +592,7 @@ class Gateway:
         return None
 
     def _fail_policy(self, identity):
-        """The caller's raw fail policy — a scalar 'open'/'closed' OR a per-reason matrix dict (W2-C7),
+        """The caller's raw fail policy — a scalar 'open'/'closed' OR a per-reason matrix dict,
         team->org via the routing overlay. Resolve it against a specific degradation reason with
         resolve_fail_policy(fp, reason). Fail-open on any policy-read error: a broken policy can't tell
         us to reject (that would 503 the request on a config error), so the switch itself degrades open."""
@@ -598,7 +603,7 @@ class Gateway:
 
     def _degraded_trace(self, req, *, request_id, stream, harness, task_id, t0, reason,
                         route_reason=None, data_label=None, identity=None) -> TraceRecord:
-        """Provenance for a fail-closed 503 (W1-C1): the request degraded and the org rejects on
+        """Provenance for a fail-closed 503: the request degraded and the org rejects on
         degradation, so no upstream call is made — but the trace row is still written, carrying
         degraded_mode, so the degradation is auditable exactly like a served one."""
         entry = self.resolve(req.model, identity)
@@ -609,11 +614,11 @@ class Gateway:
         trace.status, trace.error = "error", f"gateway_degraded:{reason}"
         trace.degraded_mode = reason
         trace.route_reason = route_reason or f"smart:{reason}"
-        trace.data_label = data_label  # W2-C7: stamp the classification even on a degradation reject
+        trace.data_label = data_label  # stamp the classification even on a degradation reject
         self._finalize(trace, t0, upstream_s=0.0)
         return trace
 
-    # --- budgets (W2-C5) -----------------------------------------------------
+    # --- budgets -------------------------------------------------------------
 
     async def _apply_budget(self, req: ChatCompletionRequest, identity, *, request_id: str,
                             stream: bool, harness, task_id, t0: float):
@@ -680,37 +685,37 @@ class Gateway:
         # Captured at entry (not read later) so streaming finalize inside the response generator
         # can't miss it. Falls back to a self-minted id for direct callers (tests, driver-internal).
         request_id = request_id or request_id_var.get() or _new_request_id()
-        # A client-declared session (S3) overrides the message fingerprint as the anchor; else the
+        # A client-declared session overrides the message fingerprint as the anchor; else the
         # stable system+first-user fingerprint. Client-sent session_id/prompt_cache_key still win
         # upstream in the runner (they stay in the body — declared_session is a separate arg).
         conv_key = _declared_key(declared_session) or _conversation_key(req.messages)
-        # Stamp the conversation anchor + resolved cache prefs (A8) on the request so both survive
+        # Stamp the conversation anchor + resolved cache prefs on the request so both survive
         # the model_copy chain down to the runner (cache-affinity hints; auto-inject knobs) and the
         # anchor drives the smart-route label memo. Internal fields, stripped before upstream
         # forwarding (schemas.passthrough_params).
         req = req.model_copy(update={"conversation_key": conv_key,
                                      "cache_prefs": self._cache_prefs(identity)})
 
-        # Smart auto-routing (SR1): resolve the `smart` sentinel to a real model BEFORE cache +
+        # Smart auto-routing: resolve the `smart` sentinel to a real model BEFORE cache +
         # plan, so cache keying, guard, catalog policy, timeouts, breaker, fallback, cost + trace
         # all run unchanged on the resolved model. No-op (smart=None) for a normally-named model.
         req, smart = await self._resolve_smart(req, identity)
-        # W1-C2: the classify wall for THIS request, or None when no classifier call ran (non-smart
+        # The classify wall for THIS request, or None when no classifier call ran (non-smart
         # request, sticky-session memo hit, or labels-off). Stamped on every trace below so the
         # fast path is visible and analytics can aggregate it.
         classify_ms = smart.classify_ms if smart is not None else None
 
-        # W2-C7 data-classification: resolve the org taxonomy's data label + constraint (rides the
+        # Data-classification: resolve the org taxonomy's data label + constraint (rides the
         # smart classify, or one dedicated classify on an explicit-model request under a taxonomy org).
         # (None, None) with zero overhead when the org configured no taxonomy.
         data_label, data_constraint = await self._resolve_data_policy(req, identity, smart)
 
-        # Fail policy (W1-C1): a smart-routing degradation (classifier failed / policy engine
+        # Fail policy: a smart-routing degradation (classifier failed / policy engine
         # errored) under an org set fail-closed is a 503, not a silent fall-through to the floor.
         # Resolved once here (raw scalar-or-matrix) — reused by the breaker-fallback check below.
         # Fail-open is the default, so degraded_mode is only STAMPED (below); the request serves the floor.
         #
-        # W2-C7 composition (documented 2x2 in docs/qa/QA-taxonomy.md): fail_policy decides serve-vs-503 for a
+        # Composition with the data taxonomy: fail_policy decides serve-vs-503 for a
         # ROUTING degradation and is checked FIRST — a closed org 503s a classify failure BEFORE the
         # taxonomy default is consulted. Only a SERVED request reaches the taxonomy constraint below
         # (the `deny` check + the local_only floor in _plan); on a classify failure that serves (open),
@@ -732,7 +737,7 @@ class Gateway:
                 t0=t0, data_label=data_label, identity=identity)
             raise DataPolicyDeniedError(data_label)
 
-        # Budget (W2-C5): over 100% → reject (402, raises here) / downgrade (rewrite req.model to the
+        # Budget: over 100% → reject (402, raises here) / downgrade (rewrite req.model to the
         # cheapest eligible model, so cache + plan + dispatch all run on it) / observe (stamp only).
         # Under budget or no budget → (req, None), unchanged. Runs before cache so a downgrade caches
         # under the cheap model's key.
@@ -748,7 +753,7 @@ class Gateway:
         from .credentials import byok_keys
 
         byok_active = bool(byok_keys.get())
-        # Zero-retention (W1-C4): the caller's org opted out of ALL durable payload persistence.
+        # Zero-retention: the caller's org opted out of ALL durable payload persistence.
         # Resolved once here and threaded to every sink below — content capture, the shared exact
         # cache (neither served-from nor seeded, exactly like BYOK), and the LangSmith mirror.
         zr = getattr(identity, "zero_retention", False)
@@ -757,7 +762,7 @@ class Gateway:
         # model is a materialized static entry here, so it caches + falls back like any base model.
         catalog = self.catalog_for(identity)
 
-        # Exact-match cache (non-stream only — YAGNI on streamed caching for v1).
+        # Exact-match cache (non-stream only — YAGNI on streamed caching).
         dynamic_requested = catalog.get(req.model) is None
         cached = None if byok_active or zr or dynamic_requested else self.cache.get(req)
         if cached is not None:
@@ -767,9 +772,9 @@ class Gateway:
                 identity=identity, conversation_key=conv_key,
             )
             trace.cache_hit, trace.route_reason, trace.status = True, "cache", "ok"
-            trace.budget_state = budget_state  # W2-C5: over-budget observe/downgrade stamp
-            trace.classify_ms = classify_ms  # W1-C2: the classify (if any) ran before the cache read
-            trace.data_label = data_label  # W2-C7: stamp for audit (a cache hit has zero egress, so
+            trace.budget_state = budget_state  # over-budget observe/downgrade stamp
+            trace.classify_ms = classify_ms  # the classify (if any) ran before the cache read
+            trace.data_label = data_label  # stamp for audit (a cache hit has zero egress, so
             # local_only is satisfied — deny already rejected above, before the cache read)
             trace.tokens_prompt = cached.usage.prompt_tokens
             trace.tokens_completion = cached.usage.completion_tokens
@@ -781,7 +786,7 @@ class Gateway:
             self._trace_smart_ls(smart, req, trace, cached_text, zr)
             return GatewayResult(cached, trace)
 
-        t_plan = time.perf_counter()  # W1-C2: decision-pipeline (plan) wall — the "route" stage
+        t_plan = time.perf_counter()  # decision-pipeline (plan) wall — the "route" stage
         try:
             entry, signal, decision, guard_action, req = self._plan(
                 req, identity, data_constraint=data_constraint, data_label=data_label)
@@ -805,13 +810,13 @@ class Gateway:
             raise
         plan_ms = _ms(time.perf_counter() - t_plan)  # reached only when planning succeeded
 
-        # Resilience (P3): same-model retry (bounded) then residency-bounded fallback across
+        # Resilience: same-model retry (bounded) then residency-bounded fallback across
         # catalog entries — shared policy with the driver (resilience.py). Only engaged when the
         # caller opts in (resilient=True, the passthrough route); the driver plane leaves it False
         # so Driver._call stays the single retry authority (no double stack). Fallback is on by
-        # default (Alex ruling) with a per-request opt-out; it never crosses the residency
+        # default with a per-request opt-out; it never crosses the residency
         # boundary (fallbacks() is residency-bounded), and the SERVED model is on the returned
-        # trace (surfaced in x_toto.model). retries=0 + no fallback ⇒ byte-identical to Phase 0.
+        # trace (surfaced in x_toto.model). retries=0 + no fallback ⇒ plain single-attempt dispatch.
         retries = self._retries if resilient else 0
         fb_on = self._passthrough_fallback if allow_fallback is None else allow_fallback
         candidate_entries = [entry]
@@ -823,7 +828,7 @@ class Gateway:
         candidates = [candidate.id for candidate in candidate_entries]
 
         first_exc: BaseException | None = None
-        breaker_forced = False  # W1-C1: a prior candidate's OPEN breaker forced this fallback
+        breaker_forced = False  # a prior candidate's OPEN breaker forced this fallback
         for i, cand_entry in enumerate(candidate_entries):
             model_id = cand_entry.id
             key = provider_key(cand_entry.base_url)
@@ -834,9 +839,9 @@ class Gateway:
                 identity=identity, conversation_key=conv_key,
             )
             self._stamp_decision(trace, signal, decision, guard_action, data_label)
-            trace.classify_ms, trace.plan_ms = classify_ms, plan_ms  # W1-C2: per-stage timings
-            trace.budget_state = budget_state  # W2-C5: over-budget observe/downgrade stamp
-            # W1-C1: a fallback served because the primary's breaker was open is a "breaker_open"
+            trace.classify_ms, trace.plan_ms = classify_ms, plan_ms  # per-stage timings
+            trace.budget_state = budget_state  # over-budget observe/downgrade stamp
+            # A fallback served because the primary's breaker was open is a "breaker_open"
             # degradation; otherwise carry the smart-routing degraded_mode (classify/policy) through.
             trace.degraded_mode = "breaker_open" if breaker_forced else degraded_reason
             if smart is not None and i == 0:  # smart chose this model — stamp label:… over passthrough
@@ -851,7 +856,7 @@ class Gateway:
             if resilient and (not self._breaker.allow(key) or await self._breaker.peer_open(key)):
                 first_exc = first_exc or CircuitOpen(key)
                 trace.status, trace.error = "error", f"circuit_open:{key}"
-                # Fail-closed (W1-C1): don't fall through to a fallback provider — a breaker-forced
+                # Fail-closed: don't fall through to a fallback provider — a breaker-forced
                 # fallback IS the degradation this org opted out of. 503 with the trace row written.
                 if resolve_fail_policy(fail_policy, "breaker_open") == "closed":
                     trace.degraded_mode = "breaker_open"
@@ -966,18 +971,18 @@ class Gateway:
         # Capture the middleware request_id at entry (see complete()): streaming finalize runs
         # inside the response generator, so we must grab it now, not read the contextvar later.
         request_id = request_id or request_id_var.get() or _new_request_id()
-        conv_key = _declared_key(declared_session) or _conversation_key(req.messages)  # S3 override
+        conv_key = _declared_key(declared_session) or _conversation_key(req.messages)  # declared wins
         req = req.model_copy(update={"conversation_key": conv_key,  # see complete(); anchor + affinity
-                                     "cache_prefs": self._cache_prefs(identity)})  # A8 auto-inject knobs
-        # Smart auto-routing (SR1): classify + resolve BEFORE the stream opens (the classify call
+                                     "cache_prefs": self._cache_prefs(identity)})  # auto-inject knobs
+        # Smart auto-routing: classify + resolve BEFORE the stream opens (the classify call
         # is its own bounded request; the user stream sees only the resolved model).
         req, smart = await self._resolve_smart(req, identity)
-        classify_ms = smart.classify_ms if smart is not None else None  # W1-C2 (see complete())
-        # W2-C7 data-classification: resolve the org taxonomy's label + constraint (see complete()).
+        classify_ms = smart.classify_ms if smart is not None else None  # see complete()
+        # Data-classification: resolve the org taxonomy's label + constraint (see complete()).
         # `local_only` threads into _plan to force the in-perimeter floor; `deny` rejects (SSE surfaces
         # it as an error event, like a block). fail_policy is checked FIRST — see the complete() note.
         data_label, data_constraint = await self._resolve_data_policy(req, identity, smart)
-        # Fail policy (W1-C1): reject a smart-routing degradation up front when the org fails closed;
+        # Fail policy: reject a smart-routing degradation up front when the org fails closed;
         # else stamp the reason on the trace below (fail-open serves the floor). The breaker/fallback
         # loop is complete()-only, so streaming degradations are classify/policy, not breaker_open.
         degraded_reason = self._smart_degraded(smart)
@@ -993,13 +998,13 @@ class Gateway:
                 t0=t0, data_label=data_label, identity=identity)
             raise DataPolicyDeniedError(data_label)
 
-        # Budget (W2-C5): same check as complete() — reject raises here (402), downgrade rewrites
+        # Budget: same check as complete() — reject raises here (402), downgrade rewrites
         # req.model before _plan runs, observe just stamps. See _apply_budget.
         req, budget_state = await self._apply_budget(
             req, identity, request_id=request_id, stream=True, harness=harness, task_id=task_id,
             t0=t0)
-        zr = getattr(identity, "zero_retention", False)  # W1-C4: gate the stream's content capture
-        t_plan = time.perf_counter()  # W1-C2: decision-pipeline (plan) wall — the "route" stage
+        zr = getattr(identity, "zero_retention", False)  # zero-retention gates content capture
+        t_plan = time.perf_counter()  # decision-pipeline (plan) wall — the "route" stage
         try:
             entry, signal, decision, guard_action, req = self._plan(
                 req, identity, data_constraint=data_constraint, data_label=data_label)
@@ -1028,9 +1033,9 @@ class Gateway:
             identity=identity, conversation_key=conv_key,
         )
         self._stamp_decision(trace, signal, decision, guard_action, data_label)
-        trace.classify_ms, trace.plan_ms = classify_ms, plan_ms  # W1-C2: per-stage timings
-        trace.budget_state = budget_state  # W2-C5: over-budget observe/downgrade stamp
-        trace.degraded_mode = degraded_reason  # W1-C1: fail-open served the floor; record it
+        trace.classify_ms, trace.plan_ms = classify_ms, plan_ms  # per-stage timings
+        trace.budget_state = budget_state  # over-budget observe/downgrade stamp
+        trace.degraded_mode = degraded_reason  # fail-open served the floor; record it
         if smart is not None:  # stamp label:… / smart:classify_failed over the passthrough reason
             trace.route_reason = smart.route_reason
             trace.label_metadata = _label_metadata_json(smart)
@@ -1149,7 +1154,7 @@ class Gateway:
     def _finalize(self, trace: TraceRecord, t0: float, *, upstream_s: float) -> None:
         total_s = time.perf_counter() - t0
         trace.latency_ms_total = _ms(total_s)
-        trace.upstream_ms = _ms(upstream_s)  # W1-C2: the upstream wall — overhead decomposes off it
+        trace.upstream_ms = _ms(upstream_s)  # the upstream wall — overhead decomposes off it
         trace.latency_ms_gateway_overhead = max(0, _ms(total_s - upstream_s))
         trace.finish()
         self.writer.write(trace)
@@ -1160,7 +1165,7 @@ class Gateway:
         response text, keyed by request_id, when TOTO_GW_LOG_CONTENT is on. Fail-open — content is
         for observability, never a reason to fail a served request (mirrors MultiTraceWriter).
 
-        W1-C4: a zero-retention org's payload never lands here regardless of the env flag — the org
+        A zero-retention org's payload never lands here regardless of the env flag — the org
         opt-out always wins over TOTO_GW_LOG_CONTENT."""
         if zero_retention or not self._log_content:
             return
@@ -1184,7 +1189,7 @@ class Gateway:
         this request was smart-routed AND LangSmith is on — so the smart passthrough is visible in
         the same project as the driver's StateGraph. Never raises (see routing.smart_trace).
 
-        W1-C4: LangSmith is an external durable telemetry store carrying prompt+response — a
+        LangSmith is an external durable telemetry store carrying prompt+response — a
         zero-retention org's payload is never mirrored there, regardless of the tracing flag."""
         from .routing import smart_trace
 
