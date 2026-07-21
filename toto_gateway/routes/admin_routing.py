@@ -81,11 +81,31 @@ def _catalog(request: Request):
     return getattr(gw, "catalog", None)  # base-catalog-ok: fallback for reduced test apps only — handlers pass _scope_catalog
 
 
+# A description under this many words is rejected outright — the classifier can't reliably match
+# one or two words against a request. The console warns (softly) below ~5 words; the hard floor
+# here is deliberately lower so a terse-but-real description still saves.
+MIN_DESC_WORDS = 3
+
+# The writing rules, verbatim in the 400 body: the error message is where an agent creating task
+# types programmatically actually learns the shape.
+DESC_GUIDANCE = (
+    "Describe the REQUEST behaviorally in one focused sentence — what the user asks for, concrete "
+    "enough to be distinguishable from the built-in task types (a description that overlaps "
+    "summarization will steal its traffic). Good: 'writing or explaining SQL queries against a "
+    "relational database'. Bad: 'database stuff'.")
+
+
 def _validate_custom_labels(raw, vocab: set[str], catalog) -> tuple[list[dict], JSONResponse | None]:
     """Validate a PUT's custom_labels (CT), fail-closed. Returns (clean_list, None) or ([], error).
     Each entry is {name, desc, model}: name is a slug, lowercase-unique, NOT a builtin labels.yaml
-    label (no shadowing the closed vocab); desc is the one-line the classifier routes on (required);
-    model must exist in the running catalog (a team can't route to a phantom model)."""
+    label (no shadowing the closed vocab); model must exist in the running catalog (a team can't
+    route to a phantom model).
+
+    `desc` IS the routing behavior: the classifier reads every prompt and matches it against these
+    descriptions, so it must describe the request behaviorally in one focused sentence,
+    distinguishable from the built-in types — e.g. "writing or explaining SQL queries against a
+    relational database", never "database stuff". Required; fewer than MIN_DESC_WORDS words is
+    rejected with the guidance in the error body."""
     if raw is None:
         return [], None
     if not isinstance(raw, list):
@@ -110,8 +130,13 @@ def _validate_custom_labels(raw, vocab: set[str], catalog) -> tuple[list[dict], 
                               "invalid_request_error", "duplicate_custom_label")
         desc = c.get("desc")
         if not isinstance(desc, str) or not desc.strip():
-            return [], _error(400, f"custom label {name!r} needs a non-empty desc "
-                              "(the classifier routes on it)",
+            return [], _error(400, f"custom label {name!r} needs a desc — the classifier matches "
+                              f"every prompt against it, so the description IS the routing "
+                              f"behavior. {DESC_GUIDANCE}",
+                              "invalid_request_error", "invalid_custom_label_desc")
+        if len(desc.split()) < MIN_DESC_WORDS:
+            return [], _error(400, f"custom label {name!r} desc {desc.strip()!r} is too thin for "
+                              f"the classifier to match reliably. {DESC_GUIDANCE}",
                               "invalid_request_error", "invalid_custom_label_desc")
         model = c.get("model")
         if not isinstance(model, str) or catalog is None or catalog.get(model) is None:
@@ -448,6 +473,19 @@ async def get_org_routing_policy(request: Request, org_id: str | None = Query(No
 @router.put("/v1/admin/org/routing-policy")
 async def put_org_routing_policy(body: dict, request: Request, org_id: str | None = Query(None),
                                  identity: Identity = Depends(require_role("admin"))):
+    """Replace the org-default routing policy. Alongside `bindings`/`optimize`/`stick_ttls`/etc.,
+    `custom_labels` defines new task types: `[{name, desc, model}]`.
+
+    Writing a custom task type's `desc`: the classifier reads every incoming prompt and matches it
+    against these descriptions, so **the description is the routing behavior**. Describe the
+    REQUEST behaviorally in one focused sentence — what the user asks for, concrete enough to be
+    distinguishable from the built-in task types (an overlap with e.g. `summarization` steals its
+    traffic). Descriptions under 3 words are rejected.
+
+        {"custom_labels": [{"name": "sql_authoring",
+                            "desc": "writing or explaining SQL queries against a relational database",
+                            "model": "or-qwen3-coder-flash"}]}
+    """
     org, err = _scope_org(identity, org_id)
     if err is not None:
         return err
@@ -522,6 +560,8 @@ async def get_routing_policy(team_id: str, request: Request,
 @router.put("/v1/admin/teams/{team_id}/routing-policy")
 async def put_routing_policy(team_id: str, body: dict, request: Request,
                              identity: Identity = Depends(require_role("admin"))):
+    """Replace one team's routing policy. Same body shape and `custom_labels` description rules as
+    PUT /v1/admin/org/routing-policy — see that endpoint for how to write a task-type `desc`."""
     team, err = await _team_in_scope(request, identity, team_id)
     if err is not None:
         return err
