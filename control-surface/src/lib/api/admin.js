@@ -232,6 +232,15 @@ export const getFireworksDiscovery = () => get('/v1/admin/catalog/discovery/fire
 export const getCloudflareDiscovery = () => get('/v1/admin/catalog/discovery/cloudflare');
 export const getAnthropicDiscovery = () => get('/v1/admin/catalog/discovery/anthropic');
 
+/** Toggle per-provider auto-adopt (opt-in, default off). When on, the daily freshness refresh
+ *  adopts newly discovered <provider> models automatically. */
+export const setAutoAdopt = (provider, enabled) =>
+  put(`/v1/admin/catalog/freshness/auto-adopt/${provider}`, { enabled });
+
+/** Accept the upstream price drift for an adopted model — rewrites its stored price to the latest
+ *  snapshot price. Until called, cost estimates keep using the stored price. */
+export const acceptPrice = (id) => post(`/v1/admin/catalog/adoptions/${id}/accept-price`, {});
+
 // ---- Catalog adoptions (one-click Add to Catalog, scoped to the caller's org) -----------------
 
 /** Adopt an upstream model into the caller's catalog — the server derives the id and all facts

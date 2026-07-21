@@ -260,6 +260,38 @@ class PoliciesMixin:
                          (scope_key, id))
         return True
 
+    # --- catalog freshness: discovery snapshots + per-provider auto-adopt pref ---
+
+    async def snapshot_rows(self, provider: str) -> list[dict]:
+        """Every stored snapshot row for a provider (slug, price_in, price_out, first_seen, last_seen)."""
+        rows = await self._all(
+            "SELECT provider, slug, price_in, price_out, first_seen, last_seen "
+            "FROM catalog_snapshots WHERE provider = ? ORDER BY slug", (provider,))
+        return [dict(r) for r in rows]
+
+    async def upsert_snapshot(self, provider: str, slug: str, price_in, price_out,
+                              now: float) -> None:
+        """Upsert one snapshot row. first_seen is preserved on conflict (it anchors the New tag);
+        last_seen + price move to the latest tick."""
+        await self._exec(
+            "INSERT INTO catalog_snapshots (provider, slug, price_in, price_out, first_seen, "
+            "last_seen) VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (provider, slug) DO UPDATE SET price_in=excluded.price_in, "
+            "price_out=excluded.price_out, last_seen=excluded.last_seen",
+            (provider, slug, price_in, price_out, now, now))
+
+    async def get_auto_adopt(self, provider: str) -> bool:
+        """The provider's auto-adopt toggle (default False — no row means off)."""
+        row = await self._one(
+            "SELECT auto_adopt FROM catalog_provider_prefs WHERE provider = ?", (provider,))
+        return bool(row["auto_adopt"]) if row is not None else False
+
+    async def set_auto_adopt(self, provider: str, enabled: bool) -> None:
+        await self._exec(
+            "INSERT INTO catalog_provider_prefs (provider, auto_adopt, updated_at) "
+            "VALUES (?, ?, ?) ON CONFLICT (provider) DO UPDATE SET auto_adopt=excluded.auto_adopt, "
+            "updated_at=excluded.updated_at", (provider, 1 if enabled else 0, time.time()))
+
     # --- price overrides — same shape/discipline as adoptions ------------------
 
     async def list_price_overrides(self, *scope_keys: str) -> list[dict]:

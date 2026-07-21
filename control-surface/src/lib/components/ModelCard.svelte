@@ -12,6 +12,7 @@
     routedTasks,
     perM,
     ctxShort,
+    firstSeenLabel,
   } from '$lib/catalog.js';
 
   // routing: the org routing-policy view or null (footer-right stays empty when null).
@@ -75,7 +76,12 @@
   </div>
   <div class="mcfoot">
     <div class="fleft">
-      {#if caps}<div class="caps">{caps}</div>{/if}
+      <div class="caps">
+        {#if m.is_new}<span class="newtag" title="First seen {firstSeenLabel(m.first_seen)}">{firstSeenLabel(m.first_seen)}</span>{/if}
+        {#if m.upstream_removed}<span class="warntag" title="No longer listed by the provider">no longer upstream</span>{/if}
+        {#if m.price_drift}<span class="drifttag" title="Upstream price changed since you adopted it — open for details">price changed upstream</span>{/if}
+        {#if caps}<span class="capstxt">{caps}</span>{/if}
+      </div>
       <div class="frow">
         {#if m.cataloged}
           <span class="cbox on" title="In catalog" role="img" aria-label="In catalog">
@@ -242,7 +248,22 @@
     font-weight: calc(600 + (var(--ui-weight) - 400));
     color: var(--text-3);
     letter-spacing: 0.02em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
   }
+  .caps .newtag,
+  .caps .warntag,
+  .caps .drifttag {
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .caps .newtag { color: var(--good, #1a7f37); background: color-mix(in srgb, var(--good, #1a7f37) 12%, transparent); }
+  .caps .warntag { color: var(--muted); background: color-mix(in srgb, var(--muted, #888) 15%, transparent); }
+  .caps .drifttag { color: var(--warn, #b45309); background: color-mix(in srgb, var(--warn, #b45309) 14%, transparent); }
   .cbox {
     width: 16px;
     height: 16px;

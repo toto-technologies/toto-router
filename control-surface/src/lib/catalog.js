@@ -276,6 +276,7 @@ export function capsLine(m, provider) {
 
 /** The library filter chips — keys match FILTER_PRED; labels are the UI text. */
 export const DISCOVERY_FILTERS = [
+  { key: 'new', label: 'New' },
   { key: 'cataloged', label: 'In catalog' },
   { key: 'not_cataloged', label: 'Not cataloged' },
   { key: 'tools', label: 'Tools' },
@@ -284,6 +285,7 @@ export const DISCOVERY_FILTERS = [
   { key: 'bigctx', label: '128k+ context' },
 ];
 export const FW_DISCOVERY_FILTERS = [
+  { key: 'new', label: 'New' },
   { key: 'cataloged', label: 'In catalog' },
   { key: 'not_cataloged', label: 'Not cataloged' },
   { key: 'tunable', label: 'Tunable (LoRA)' },
@@ -292,6 +294,7 @@ export const FW_DISCOVERY_FILTERS = [
 ];
 // Cloudflare exposes tools/vision/context but no per-token price → same chips as OpenRouter minus 'cheap'.
 export const CF_DISCOVERY_FILTERS = [
+  { key: 'new', label: 'New' },
   { key: 'cataloged', label: 'In catalog' },
   { key: 'not_cataloged', label: 'Not cataloged' },
   { key: 'tools', label: 'Tools' },
@@ -304,6 +307,7 @@ export const AN_DISCOVERY_FILTERS = [
   { key: 'not_cataloged', label: 'Not cataloged' },
 ];
 const FILTER_PRED = {
+  new: (m) => !!m.is_new,
   cataloged: (m) => !!m.cataloged,
   not_cataloged: (m) => !m.cataloged,
   tools: (m) => !!m.tools,
@@ -312,6 +316,23 @@ const FILTER_PRED = {
   cheap: (m) => m.price_in != null && m.price_in <= 0.001, // ≤ $1 per M = ≤ $0.001 per 1k
   bigctx: (m) => (m.context_window ?? 0) >= 128000,
 };
+
+/** Join adoption freshness flags (upstream_removed / price_drift, keyed by upstream_model) onto the
+ *  discovery rows so a cataloged card can show them. Returns a fresh array. */
+export function withFreshnessFlags(models, adoptions) {
+  const bySlug = new Map((adoptions ?? []).map((a) => [a.upstream_model, a]));
+  return (models ?? []).map((m) => {
+    const a = bySlug.get(m.slug);
+    return a ? { ...m, upstream_removed: a.upstream_removed, price_drift: a.price_drift } : m;
+  });
+}
+
+/** 'first seen Jul 21' from an epoch-seconds first_seen, '' when absent. */
+export function firstSeenLabel(first_seen) {
+  if (!first_seen) return '';
+  const d = new Date(first_seen * 1000);
+  return `new · ${d.toLocaleString('en-US', { month: 'short', day: 'numeric' })}`;
+}
 
 /** Search (name/slug substring — the slug carries the vendor) + AND of the active filter keys. */
 export function filterDiscovery(models, q, active) {

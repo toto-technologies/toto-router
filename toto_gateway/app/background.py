@@ -66,6 +66,31 @@ async def _benchmark_refresher(app: FastAPI, settings: Settings) -> None:
             blog.warning("scheduled benchmark refresh failed", extra={"err": str(e)})
 
 
+async def _freshness_refresher(app: FastAPI, settings: Settings) -> None:
+    """Catalog freshness: every catalog_freshness_refresh_hours, snapshot each provider's discovery
+    list and diff it (added/removed/re-priced), persisting the durable snapshot and stashing the
+    diff on app.state.catalog_freshness for the console's "N new" + last-checked/degrade note. First
+    tick jittered within the interval so replicas don't stampede a provider. A bad tick logs and
+    keeps ticking; the lifespan cancels cleanly on shutdown."""
+    import random
+
+    from ..freshness import run_freshness
+
+    flog = logging.getLogger("toto_gateway.freshness")
+    interval = settings.catalog_freshness_refresh_hours * 3600
+    await asyncio.sleep(random.uniform(0, min(interval, 3600)))  # jitter the first run (cap 1h)
+    while True:
+        try:
+            app.state.catalog_freshness = await run_freshness(
+                app, window_days=settings.catalog_freshness_new_window_days)
+            prov = app.state.catalog_freshness["providers"]
+            flog.info("catalog freshness refresh", extra={
+                "new": {p: len(d["added"]) for p, d in prov.items() if d["added"]}})
+        except Exception as e:  # noqa: BLE001 — never kill the loop or the app
+            flog.warning("catalog freshness refresh failed", extra={"err": str(e)})
+        await asyncio.sleep(interval)
+
+
 async def _inventory_refresher(app: FastAPI, settings: Settings) -> None:
     """Delayed scheduled inventory refresh through the same compile/submit path as the API."""
     from ..benchmarking.platform import InventoryRefreshIntent, PlatformActor
