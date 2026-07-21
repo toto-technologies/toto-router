@@ -27,10 +27,23 @@ warning naming that env var; passthrough and the fake lane work regardless, and 
 
 The fake lane routes for real and executes offline — no API keys, no GPU, no network.
 
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
+Requires Python 3.12+. With [uv](https://docs.astral.sh/uv/) (recommended — fetches a working Python for you):
 
+```bash
+uv venv --python 3.13 .venv && source .venv/bin/activate
+uv pip install -e .
+```
+
+Or with plain Python (some 3.14 installs fail to bootstrap pip inside venvs — if `python3 -m venv` errors, use uv):
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+```
+
+Then:
+
+```bash
 TOTO_GW_FAKE_EXEC=1 TOTO_GW_AUTH_TOKEN=dev toto-router   # or: python -m toto_gateway
 
 curl http://127.0.0.1:8080/v1/models -H 'authorization: Bearer dev'
