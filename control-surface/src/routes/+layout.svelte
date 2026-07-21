@@ -10,6 +10,8 @@
   import { query } from '$lib/api/resource.svelte.js';
   import { getOrg, getMe, getUsage, logout, getMemberships, setActiveOrg } from '$lib/api/admin.js';
   import Login from '$lib/components/Login.svelte';
+  import CommandPalette from '$lib/components/CommandPalette.svelte';
+  import { clearOperatorToken } from '$lib/oss-auth.js';
   import { fmtUsd } from '$lib/usage.js';
 
   let { children } = $props();
@@ -83,10 +85,11 @@
 
   async function signOut() {
     try {
-      await logout();
+      await logout(); // server expires the session AND operator cookies
     } catch {
       /* revoke is best-effort; clear the client either way by reloading to the gate */
     }
+    clearOperatorToken(); // belt + braces for the OSS operator cookie (client-set, client-cleared)
     window.location.assign(base + '/');
   }
 
@@ -176,11 +179,9 @@
       {/if}
     </div>
 
-    <div class="search">
-      <svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" /></svg>
-      <input bind:this={searchEl} placeholder={OSS ? 'Search models, catalog, usage…' : 'Search models, teams, audit…'} aria-label="Search" />
-      <span class="kbd">⌘K</span>
-    </div>
+    <CommandPalette
+      bind:this={searchEl}
+      placeholder={OSS ? 'Search models, catalog, usage…' : 'Search models, teams, audit…'} />
 
     <div class="topright">
       <div class="spendchip" title="{orgName} spend this billing period (month to date)">

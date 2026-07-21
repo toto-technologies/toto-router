@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from ..auth import VERIFY_TTL, AuthStore, burn_dummy_hash, hash_password, verify_password
 from ..credentials import provision_and_store
 from ..mailer import send_verification
-from .deps import SESSION_COOKIE, Identity, require_auth
+from .deps import OPERATOR_COOKIE, SESSION_COOKIE, Identity, require_auth
 
 router = APIRouter()
 
@@ -408,6 +408,9 @@ async def logout(request: Request):
         await _audit(request, "logout", user["user_id"] if user else None)
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(SESSION_COOKIE, path="/")
+    # The OSS console authenticates via the operator cookie (deps.OPERATOR_COOKIE), not a
+    # server session — expire it too, or Sign out leaves the operator silently signed in.
+    response.delete_cookie(OPERATOR_COOKIE, path="/")
     return response
 
 

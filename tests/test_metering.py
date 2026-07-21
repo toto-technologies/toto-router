@@ -282,6 +282,8 @@ def test_export_endpoint_shape(usage_app):
           tokens_prompt=1000, tokens_completion=200, cost_usd=3.0)
     r = client.get("/v1/admin/usage/export", params={"period": "2026-07"})
     assert r.status_code == 200
+    # Downloads as a real file on direct navigation (the console's Download button).
+    assert r.headers["content-disposition"] == 'attachment; filename="toto-billing-2026-07.json"'
     body = r.json()
     assert body["period"] == "2026-07" and body["org_id"] == "o_a"
     li = body["line_items"][0]
