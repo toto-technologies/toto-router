@@ -10,7 +10,9 @@
   //       Adopt / Fix-ref YAML hand-offs. Always-200 contract — key-missing/upstream-fail are data.
   //   D · team access (team scope only): allow/deny + residency + team default (PUT on save).
   // "Add task type" posts a custom_labels entry (CT).
+  import { untrack } from 'svelte';
   import { browser } from '$app/environment';
+  import { page } from '$app/state';
   import { query } from '$lib/api/resource.svelte.js';
   import { prettyModel, providerLabel, newerCheaper } from '$lib/models.js';
   import { taskLabel } from '$lib/tasks.js';
@@ -186,6 +188,12 @@
   function scrollToCatalog(id) {
     document.getElementById(`cat-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
+  // Deep link (#cat-<id>, e.g. from the ⌘K palette): scroll once the rows exist / when it changes.
+  $effect(() => {
+    if (!browser || !modelList.length) return;
+    const hash = page.url.hash?.slice(1) ?? '';
+    if (hash.startsWith('cat-')) document.getElementById(hash)?.scrollIntoView({ block: 'center' });
+  });
 
   // Price signal (cheap→premium) from the blended $/1k. Terciles relative to the catalog's own max —
   // ponytail: self-calibrating so it stays sane across providers; swap for absolute $ bands if the
@@ -391,7 +399,21 @@
 
   let saving = $state(false);
   let saveErr = $state(null);
+
+  // ---- Dirty guard: Save is enabled only when the would-be PUT bodies differ from what the
+  // server already has. Snapshot the serialized bodies whenever the seed key changes (fresh data
+  // or post-save reload — both re-seed edit state), untracked so edits don't overwrite it.
+  const serializeEdits = () =>
+    JSON.stringify([routingBody(customLabels), isOrg ? null : catalogBody()]);
+  let savedSnapshot = $state(null);
+  $effect(() => {
+    void seedKey; // the one dependency — reruns exactly when edit state was re-seeded
+    savedSnapshot = seedKey == null ? null : untrack(serializeEdits);
+  });
+  const dirty = $derived(savedSnapshot != null && serializeEdits() !== savedSnapshot);
+
   async function save() {
+    if (saving || !dirty) return; // no-op saves never PUT (a clean save would still bump version)
     saving = true;
     saveErr = null;
     try {
@@ -647,7 +669,11 @@
     {:else}
       <span class="scopepill">Policy for <b>{teamName}</b><span class="chev">▾</span></span>
     {/if}
-    <button class="btn small primary" disabled={saving || !scopeReady || !ready(routingQ) || !ready(modelsQ)} onclick={save}>
+    <button
+      class="btn small primary"
+      disabled={saving || !dirty || !scopeReady || !ready(routingQ) || !ready(modelsQ)}
+      title={dirty ? 'Save your changes' : 'No unsaved changes'}
+      onclick={save}>
       {saving ? 'Saving…' : `Save policy · v${version}`}
     </button>
   </div>

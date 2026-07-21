@@ -14,6 +14,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import JSONResponse
 
 from ..metering import cache_health, cache_savings, export_billing_records, rollup_usage
 from ..trace import sql_engine
@@ -157,9 +158,13 @@ async def export_usage(
     if err is not None:
         return err
     records = export_billing_records(engine, org, period)
-    return {
-        "period": period,
-        "org_id": org,
-        "format": format,
-        "line_items": [vars(r) for r in records],
-    }
+    return JSONResponse(
+        {
+            "period": period,
+            "org_id": org,
+            "format": format,
+            "line_items": [vars(r) for r in records],
+        },
+        # A direct navigation (the console's Download button) saves a real file; XHR ignores it.
+        headers={"Content-Disposition": f'attachment; filename="toto-billing-{period}.json"'},
+    )

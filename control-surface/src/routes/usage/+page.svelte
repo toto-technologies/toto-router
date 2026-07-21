@@ -102,7 +102,8 @@
       <input type="month" bind:value={period} aria-label="Billing period"
         style="background:transparent;border:0;color:inherit;font:inherit;padding:0" />
     </label>
-    <button class="btn small" onclick={openExport}>Export ▾</button>
+    <!-- One export format exists (Stripe-shaped JSON), so no format menu — a plain button. -->
+    <button class="btn small" onclick={openExport}>Export</button>
   </div>
 </div>
 
@@ -281,6 +282,10 @@
       <pre class="num" style="margin:0;max-height:200px;overflow:auto;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:11px;font-size:0.6875rem;line-height:1.5">{JSON.stringify(ex.data, null, 2)}</pre>
     </div>
   {/if}
+  {#snippet footer()}
+    <!-- Direct navigation: the endpoint's Content-Disposition saves toto-billing-{period}.json -->
+    <a class="btn small" href="/v1/admin/usage/export?period={period}&format=stripe" download>Download JSON</a>
+  {/snippet}
 </Modal>
 
 <style>

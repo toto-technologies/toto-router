@@ -5,7 +5,7 @@
   import SegmentedControl from '$lib/components/SegmentedControl.svelte';
   import SkeletonTable from '$lib/components/SkeletonTable.svelte';
   import { query } from '$lib/api/resource.svelte.js';
-  import { getRequests, getRequestDetail, listModels, listMembers, getMe } from '$lib/api/admin.js';
+  import { getRequests, getRequestDetail, listMembers, getMe } from '$lib/api/admin.js';
   import { prettyModel, priceFmt } from '$lib/models.js';
   import { taskLabel } from '$lib/tasks.js';
   import { fmtTime, relTime, isoAttr } from '$lib/time.js';
@@ -46,9 +46,14 @@
         : 'Requests'
   );
 
-  // Model filter options come from the running catalog (a real, known set); empty until it loads.
-  const modelsRes = query(() => listModels());
-  const modelOpts = $derived((modelsRes.data?.models ?? []).map((m) => m.id));
+  // Model filter options = models actually seen in this traffic (accumulated across fetches),
+  // not the whole catalog — every option is guaranteed to match at least one logged request.
+  let modelOpts = $state([]);
+  $effect(() => {
+    const seen = new Set(modelOpts);
+    for (const r of reqs.data?.requests ?? []) if (r.model) seen.add(r.model);
+    if (seen.size !== modelOpts.length) modelOpts = [...seen].sort();
+  });
 
   function windowRange() {
     const now = Math.floor(Date.now() / 1000);
