@@ -5,6 +5,7 @@
   // (see $lib/traffic.js). Cold-start rule is hard: no traffic for the task type → static per-1M
   // prices only, never a fabricated estimate.
   import { prettyModel } from '$lib/models.js';
+  import { taskLabel as fmtTask } from '$lib/tasks.js';
   import { perMtok, fmtMtok } from '$lib/pricing.js';
   import { ctxShort } from '$lib/catalog.js';
   import { monthlyCost, fmtMonthly } from '$lib/traffic.js';
@@ -278,12 +279,12 @@
         <b>Compare</b>
         {#if taskLabel && labelStat}
           <span class="mp-thesis">
-            your <span class="n">{taskLabel}</span> traffic at current volume —
+            your <b>{fmtTask(taskLabel)}</b> traffic at current volume —
             ~{Math.round(labelStat.perMonth)} req/mo · ~{Math.round(labelStat.avgTokensIn)} in /
             {Math.round(labelStat.avgTokensOut)} out tok/req
           </span>
         {:else if taskLabel}
-          <span class="mp-thesis cold">no traffic yet for <span class="n">{taskLabel}</span> — priced per 1M tokens</span>
+          <span class="mp-thesis cold">no traffic yet for <b>{fmtTask(taskLabel)}</b> — priced per 1M tokens</span>
         {/if}
         <button class="mp-back" onclick={() => (listView = true)} type="button">‹ back to list</button>
       </div>
@@ -298,7 +299,7 @@
             <div class="mp-colid n">{m.id}</div>
             {#if est != null}
               <div class="mp-est">{fmtMonthly(est)}</div>
-              <div class="mp-estsub">for {taskLabel} at current volume</div>
+              <div class="mp-estsub">for {fmtTask(taskLabel)} at current volume</div>
             {:else}
               <div class="mp-est cold">{blended(m) == null ? 'unpriced' : price2(m)}</div>
               <div class="mp-estsub">{taskLabel ? 'no traffic yet — static price' : 'per 1M tokens'}</div>
@@ -503,7 +504,6 @@
   .mp-cmphead b { font-size: 0.8125rem; }
   .mp-thesis { font-size: 0.71875rem; color: var(--text-2); }
   .mp-thesis.cold { color: var(--text-3); }
-  .mp-thesis .n { font-size: 0.6875rem; }
   .mp-back {
     all: unset;
     cursor: pointer;

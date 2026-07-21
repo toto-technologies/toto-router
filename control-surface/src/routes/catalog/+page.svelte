@@ -13,6 +13,7 @@
   import { browser } from '$app/environment';
   import { query } from '$lib/api/resource.svelte.js';
   import { prettyModel, providerLabel, newerCheaper } from '$lib/models.js';
+  import { taskLabel } from '$lib/tasks.js';
   import { perMtok, fmtMtok } from '$lib/pricing.js';
   import { loadTrafficRows, trafficStats } from '$lib/traffic.js';
   import { providerHue, providerMark } from '$lib/benchmarks.js';
@@ -744,7 +745,7 @@
               <tr class:governed={!row.bindable} class:genrow={row.label === 'other'}>
                 <td>
                   <div class="tasktype">
-                    <span class="troute" aria-hidden="true"></span>{row.label === 'other' ? 'Generalist' : row.label}
+                    <span class="troute" aria-hidden="true"></span>{taskLabel(row.label)}
                     {#if row.label === 'other'}<span class="chip gen" style="margin-left:2px">catch-all</span>{/if}
                     {#if row.custom}<span class="chip ovr" style="margin-left:2px">custom</span>{/if}
                   </div>
@@ -1313,7 +1314,7 @@
       <b>Task types currently using this model</b>
       <ul>
         {#each removeAffected.builtins as r (r.label)}
-          <li><span class="n">{r.label === 'other' ? 'Generalist' : r.label}</span> — reverts to its default, {prettyId(r.default_model)}</li>
+          <li><span class="n">{taskLabel(r.label)}</span> — reverts to its default, {prettyId(r.default_model)}</li>
         {/each}
         {#each removeAffected.customs as c (c.name)}
           <li><span class="n">{c.name}</span> (custom) — will use {prettyId(removeFallback)}</li>
