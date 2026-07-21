@@ -130,7 +130,6 @@
     { k: 'Classified as', v: (r) => r.classified_as || 'unclassified' },
     { k: 'Model served', v: (r) => prettyModel(r.model) },
     { k: 'Route reason', v: (r) => r.route_reason || '—', mono: true },
-    { k: 'Tier', v: (r) => r.lane || '—' },
     { k: 'Residency', v: (r) => r.residency || '—' },
     { k: 'Guard action', v: (r) => r.guard_action || 'none' },
     { k: 'Status', v: (r) => r.status || '—' },

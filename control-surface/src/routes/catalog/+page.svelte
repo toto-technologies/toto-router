@@ -56,7 +56,7 @@
   const OPTHINT = {
     quality: 'Breaks ties toward the stronger model on the fallback path — bound task types are unaffected.',
     balanced: 'Breaks ties toward the best price-for-quality model on the fallback path.',
-    cost: 'Breaks ties toward the cheaper same-tier model on the fallback path.',
+    cost: 'Breaks ties toward the cheaper comparable model on the fallback path.',
   };
   const OPT_OPTS = [
     { value: 'quality', label: 'Quality' },
@@ -925,7 +925,7 @@
           <table class="provtable">
             <thead>
               <tr>
-                <th>Model</th><th>Tier</th><th class="r">$ / 1K in·out</th>
+                <th>Model</th><th class="r">$ / 1K in·out</th>
                 <th class="r">Context</th><th>Residency</th><th class="dcol"></th>
               </tr>
             </thead>
@@ -943,7 +943,6 @@
                       {#each m.aliases ?? [] as a}<span class="idchip n alias" title="alias">{a}</span>{/each}
                     </div>
                   </td>
-                  <td>{#if m.lane}<span class="tier {m.lane}">{m.lane}</span>{/if}</td>
                   <td class="r n">{priceFmt(m.price_in)}·{priceFmt(m.price_out)}</td>
                   <td class="r n">{ctxShort(m.context_window)}</td>
                   <td>
@@ -979,7 +978,7 @@
                 {#if expanded.has(m.id)}
                   {@const up = upstreamParts(m.upstream_model)}
                   <tr class="drow">
-                    <td colspan="6">
+                    <td colspan="5">
                       <div class="dgrid">
                         <div class="df">
                           <span>Upstream</span>
