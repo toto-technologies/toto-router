@@ -279,10 +279,6 @@ td.r,th.r{text-align:right} .n{font-family:var(--mono);font-variant-numeric:tabu
 .chip .d{width:6px;height:6px;border-radius:50%}
 .chip.perim{color:var(--perimeter);background:var(--perimeter-soft);border-color:transparent} .chip.perim .d{background:var(--perimeter)}
 .chip.cloud{color:var(--cloud);background:var(--cloud-soft);border-color:transparent} .chip.cloud .d{background:var(--cloud)}
-.tier{font-family:var(--mono);font-size:0.65625rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-2);
-  padding:1px 6px;border:1px solid var(--line-2);border-radius:4px}
-.tier.frontier{color:var(--accent);border-color:var(--accent-line)}
-.tier.economy{color:var(--perimeter);border-color:rgba(72,201,169,.3)}
 .via{font-family:var(--mono);font-size:0.65625rem;color:var(--text-3);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
 
 .state{display:inline-flex;align-items:center;gap:6px;font-size:0.71875rem;font-weight:calc(600 + (var(--ui-weight) - 400))}

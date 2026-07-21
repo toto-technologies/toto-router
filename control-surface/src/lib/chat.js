@@ -94,8 +94,8 @@ export function sealCard(card, snap) {
  * Everything the template shows is pre-formatted here so it's node --test'able:
  *   header      "agentic · optimizing for quality" (plain words, no jargon)
  *   candidates  [{rank, name, source, pct, evidence, thin, benchmarks, price, tools}]
- *               name = real upstream name; source = friendly provider, else the lane's plain
- *               word (never a naked host/port); pct = score as 0-100; thin = n<=1 evidence;
+ *               name = real upstream name; source = friendly provider, else blank (never a
+ *               naked host/port); pct = score as 0-100; thin = n<=1 evidence;
  *               benchmarks = names only (raw fact values never render); price = $/1k mono line.
  *   unscored    one quiet sentence, or '' when everything scored.
  */
@@ -110,7 +110,7 @@ export function recChip(chip = {}) {
     return {
       rank: i + 1,
       name: prettyModel(c.model),
-      source: friendly || (c.lane ? String(c.lane).toLowerCase() : ''),
+      source: friendly || '',
       pct: Math.max(0, Math.min(100, Math.round((c.score ?? 0) * 100))),
       evidence: `from ${n} benchmark${n === 1 ? '' : 's'}`,
       thin: n <= 1,
