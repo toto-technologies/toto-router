@@ -140,8 +140,10 @@ def test_admin_key_store_round_trip():
     with TestClient(create_app(settings=settings)) as client:
         r = client.put("/v1/admin/provider-keys/anthropic", json={"key": "sk-ant-api03-TEST42"})
         assert r.status_code == 200, r.text
-        assert r.json() == {"provider": "anthropic", "configured": True, "masked": "ST42",
-                            "source": "stored"}
+        body = r.json()
+        assert {k: body[k] for k in ("provider", "configured", "masked", "source")} == {
+            "provider": "anthropic", "configured": True, "masked": "ST42", "source": "stored"}
+        assert body["models_added"] == []  # no anthropic fragment composed in this boot
         rows = {p["provider"]: p for p in client.get("/v1/admin/provider-keys").json()["providers"]}
         assert rows["anthropic"]["source"] == "stored"
         assert rows["anthropic"]["label"] == "Anthropic"
