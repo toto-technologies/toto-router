@@ -73,10 +73,15 @@ async def get_usage(
     org, err = _scope_org(identity, org_id)
     if err is not None:
         return err
-    engine, err = _engine_or_error(request)
-    if err is not None:
-        return err
+    engine = sql_engine(getattr(request.app.state.gateway, "writer", None))
     dims = [d.strip() for d in group_by.split(",") if d.strip()]
+    if engine is None:
+        # No trace DB is a legitimate configuration (TOTO_GW_TRACE_DB=off, :memory:/PG boots),
+        # not a server fault — the header spend chip polls this on every page, so answer with an
+        # honest empty rollup instead of a 503. trace_db:false lets the console say "tracking is
+        # off" rather than "$0.00". The drill-down usage routes keep their informative 503.
+        return {"org_id": org, "group_by": dims, "granularity": granularity, "rows": [],
+                "trace_db": False}
     try:
         rows = rollup_usage(engine, org_id=org, group_by=dims, start=start, end=end,
                             granularity=granularity)

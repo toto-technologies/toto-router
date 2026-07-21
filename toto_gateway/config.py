@@ -59,6 +59,10 @@ class Settings(BaseSettings):
 
     # Trace sinks
     trace_jsonl: str = "traces.jsonl"
+    # Trace/metering DB: a sqlite:/// URL or path, or postgresql://…. Backs the console's
+    # Activity + Usage tabs. Unset in the oss edition with a file-backed gateway DB → defaults to
+    # a SQLite DB beside it (_default_trace_db), so those tabs work out of the box. "off" disables
+    # tracing explicitly (env vars can't distinguish unset from empty); an explicit URL always wins.
     trace_db: str = ""
     trace_stdout: bool = True
     # Observability content capture: store the actual prompt (request messages) + served response
@@ -595,6 +599,24 @@ class Settings(BaseSettings):
                              if os.environ.get(d.api_key_env, "").strip()}
             self.catalog = compose_default_catalog(env_providers)
             self._catalog_defaulted = True
+        return self
+
+    @model_validator(mode="after")
+    def _default_trace_db(self) -> "Settings":
+        """Resolve an unset trace DB (see the `trace_db` field comment). TOTO_GW_TRACE_DB=off →
+        tracing stays off. Unset in an oss file-backed-SQLite boot → sqlite beside the gateway DB
+        (same data-dir convention as the generated credentials secret); :memory:/Postgres deploys
+        keep configuring it deliberately."""
+        if self.trace_db.strip().lower() == "off":
+            self.trace_db = ""
+            return self
+        if (not self.trace_db and self.edition.strip().lower() == "oss"
+                and self.db and self.db != ":memory:" and not self.database_url):
+            from pathlib import Path
+
+            data_dir = Path(self.db).resolve().parent
+            data_dir.mkdir(parents=True, exist_ok=True)  # sqlite needs the dir before first write
+            self.trace_db = f"sqlite:///{data_dir / 'traces.db'}"
         return self
 
     def provider_timeout(self, *, local: bool = False):
