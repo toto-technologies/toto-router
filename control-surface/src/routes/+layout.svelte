@@ -14,6 +14,8 @@
   let { children } = $props();
 
   // Inlined edition check (not $lib/edition.js) so edition branches fold at build time — vite.config.js `define`.
+  // (OSS also seamless-launches: app.html consumes a `#token=…` fragment into the operator cookie
+  // before hydration, so the identity probes below fire already-authenticated.)
   const OSS = typeof __EDITION__ !== 'undefined' && __EDITION__ === 'oss';
 
   let orgOpen = $state(false);
@@ -127,6 +129,7 @@
           <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg>
         </button>
       </div>
+      <a class="updates" href="https://toto.tech" target="_blank" rel="noopener">Get release updates</a>
     </div>
   </aside>
 

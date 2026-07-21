@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite dev --port 5180",
     "build": "vite build",
-    "build:oss": "node dev/make-oss-routes.mjs && VITE_EDITION=oss CONSOLE_ROUTES=src/routes-oss vite build",
+    "build:oss": "node dev/make-oss-routes.mjs && VITE_EDITION=oss CONSOLE_BASE=/console CONSOLE_ROUTES=src/routes-oss vite build",
     "preview": "vite preview --port 5180",
     "test": "node --test",
     "test:e2e": "playwright test"

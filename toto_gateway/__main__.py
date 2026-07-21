@@ -7,15 +7,32 @@ is intentional (not an oversight) — see the inline notes.
 
 from __future__ import annotations
 
+import logging
+
 import uvicorn
 
 from .config import get_settings
 from .obs import setup_logging
 
 
+def _print_console_url(settings) -> None:
+    """One-click console launch for the OSS/local edition: log a ready-to-open URL carrying the
+    operator token in the URL FRAGMENT (never a query param, so it stays out of server logs and
+    Referer headers). The console reads it on load, authenticates, and strips it from the address
+    bar. Only when token auth is on and this is the oss edition — enterprise uses account login."""
+    if settings.edition.strip().lower() != "oss" or not settings.auth_token:
+        return
+    host = "127.0.0.1" if settings.host in ("0.0.0.0", "::") else settings.host
+    # Point at the real app page, not the /console/ redirect stub — that stub navigates without the
+    # fragment, dropping the token before the SPA can read it.
+    url = f"http://{host}:{settings.port}/console/overview#token={settings.auth_token}"
+    logging.getLogger("toto_gateway").info("console ready — open %s", url)
+
+
 def main() -> None:
     settings = get_settings()
     setup_logging(settings.log_level)
+    _print_console_url(settings)
     uvicorn.run(
         "toto_gateway.app:create_app",
         factory=True,

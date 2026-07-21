@@ -30,6 +30,13 @@ SESSION_COOKIE = "toto_session"
 OPERATOR_COOKIE = "toto_operator"
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
+# Single-tenant sentinel scope for the OSS edition. The operator IS the only tenant, so its
+# routing/governance lives under one well-known key: the console (authed as operator) reads/writes
+# the org-default routing policy here, and the operator's own bearer traffic resolves policy from
+# the same key — so a console binding actually governs `Bearer <token>` requests. Enterprise keeps
+# the unscoped operator (no implicit org; a multi-tenant super-credential must name an org).
+OSS_LOCAL_ORG = "local"
+
 
 @dataclass(frozen=True)
 class Identity:
@@ -260,6 +267,17 @@ async def _resolve_price_overrides(auth, org_id: str | None, team_id: str | None
     return merged
 
 
+async def _operator_identity(settings, auth) -> Identity:
+    """The resolved operator identity. Enterprise → the pure unscoped OPERATOR. OSS → the operator
+    bound to the single-tenant `local` scope, carrying the routing overlay stored there, so the
+    governance the operator sets in the console governs its OWN bearer traffic (effective_policy
+    reads routing_policy off the Identity). Resolved fresh per request → console edits apply live."""
+    if settings.edition.strip().lower() != "oss":
+        return OPERATOR
+    routing_policy = await _resolve_routing_policy(auth, OSS_LOCAL_ORG, None)
+    return replace(OPERATOR, org_id=OSS_LOCAL_ORG, routing_policy=routing_policy)
+
+
 async def _resolve_identity(request: Request) -> Identity:
     """Operator bearer (timing-safe) OR user API bearer (sha256 lookup) OR toto_session
     cookie → verified user, else unauthenticated."""
@@ -272,13 +290,13 @@ async def _resolve_identity(request: Request) -> Identity:
         key = request.headers.get("x-api-key", "")
         if key:
             header = f"Bearer {key}"
+    auth = getattr(request.app.state, "auth", None)
     if settings.auth_token:
         if hmac.compare_digest(header, f"Bearer {settings.auth_token}"):
-            return OPERATOR
+            return await _operator_identity(settings, auth)
         cookie = request.cookies.get(OPERATOR_COOKIE, "")
         if cookie and hmac.compare_digest(cookie.encode(), settings.auth_token.encode()):
-            return OPERATOR
-    auth = getattr(request.app.state, "auth", None)
+            return await _operator_identity(settings, auth)
     # A bearer that isn't the operator token: a per-user API token OR an org-owned service token
     # (both sha256-at-rest). ONE indexed read resolves either (resolve_bearer), plus a distinct
     # 401 `token_expired` for a lapsed token so a client can tell expiry from revocation.

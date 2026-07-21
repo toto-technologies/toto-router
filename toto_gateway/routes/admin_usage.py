@@ -28,10 +28,14 @@ def _scope_org(identity: Identity, requested: str | None):
     an explicit `org_id` that differs is cross-org access → 403. The operator (no home org) MUST
     name an org explicitly. Returns (org_id, error) — exactly one is set."""
     if identity.is_operator:
-        if not requested:
+        # OSS binds the operator to the `local` sentinel org (Identity.org_id), so an org-less
+        # console call from the operator resolves there instead of 400-ing. Enterprise operators
+        # carry no org_id, so they must still name one explicitly (multi-tenant safety).
+        org = requested or identity.org_id
+        if not org:
             return None, _error(400, "operator must specify ?org_id=", "invalid_request_error",
                                 "org_id_required")
-        return requested, None
+        return org, None
     home = identity.org_id
     if home is None:
         return None, _error(403, "caller has no org", "authorization_error", "no_org")

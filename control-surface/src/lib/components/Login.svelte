@@ -4,10 +4,41 @@
   // Same-origin, cookie-session: login/register set the httpOnly toto_session cookie server-side;
   // on success we hard-navigate to the Overview so the shell re-runs its identity/org/usage loads.
   import { base } from '$app/paths';
-  import { login, register } from '$lib/api/admin.js';
+  import { login, register, getMe } from '$lib/api/admin.js';
   import { ApiError } from '$lib/api/client.js';
+  import { setOperatorToken, clearOperatorToken } from '$lib/oss-auth.js';
+
+  // OSS single-tenant: no accounts — one operator token gates the console (Grafana/Jupyter pattern).
+  // Statically foldable so the account/SSO form is dead-code-eliminated from the OSS bundle.
+  const OSS = typeof __EDITION__ !== 'undefined' && __EDITION__ === 'oss';
 
   const MIN_PASSWORD_LEN = 8; // mirrors MIN_PASSWORD_LEN in routes/auth.py
+
+  // --- OSS token gate ---
+  let token = $state('');
+  let tokenBusy = $state(false);
+  let tokenError = $state('');
+
+  async function submitToken(e) {
+    e.preventDefault();
+    tokenError = '';
+    if (!token.trim()) {
+      tokenError = 'Paste your gateway token to continue.';
+      return;
+    }
+    tokenBusy = true;
+    setOperatorToken(token.trim()); // the cookie the gateway reads; validate it with a probe
+    try {
+      const meResp = await getMe();
+      if (!meResp?.is_operator) throw new ApiError(401, 'invalid_token', 'not the operator token');
+      done();
+    } catch {
+      clearOperatorToken();
+      tokenError = "That token wasn't accepted. Check TOTO_GW_AUTH_TOKEN and try again.";
+    } finally {
+      tokenBusy = false;
+    }
+  }
 
   let mode = $state('login'); // 'login' | 'register'
   let email = $state('');
@@ -118,6 +149,37 @@
 </script>
 
 <div class="authgate">
+  {#if OSS}
+    <form class="authcard card" onsubmit={submitToken}>
+      <div class="authbrand">
+        <div class="glyph"></div>
+        <div class="name"><b>TOTO</b> <span>Control</span></div>
+      </div>
+
+      <h1>Connect to your gateway</h1>
+      <p class="authsub">Paste the gateway token (<code>TOTO_GW_AUTH_TOKEN</code>) to open the console.</p>
+
+      <div class="field">
+        <label for="auth-token">Gateway token</label>
+        <input
+          id="auth-token"
+          type="password"
+          autocomplete="off"
+          bind:value={token}
+          placeholder="paste your token"
+          required
+        />
+      </div>
+
+      {#if tokenError}
+        <div class="authmsg err" role="alert">{tokenError}</div>
+      {/if}
+
+      <button class="btn primary authsubmit" type="submit" disabled={tokenBusy}>
+        {tokenBusy ? 'Connecting…' : 'Connect'}
+      </button>
+    </form>
+  {:else}
   <form class="authcard card" onsubmit={submit}>
     <div class="authbrand">
       <div class="glyph"></div>
@@ -179,6 +241,7 @@
       Continue with SSO
     </button>
   </form>
+  {/if}
 </div>
 
 <style>
