@@ -1,4 +1,4 @@
-"""Sessions API — the live-routing plane (docs/plans/2026-07-01-live-routing-e2e.md, B2).
+"""Sessions API — the live-routing plane.
 
 POST creates a session and launches the driver run asynchronously; GET /events streams the
 run's spans over SSE with exact Last-Event-ID resume; the snapshot endpoint makes a mid-run

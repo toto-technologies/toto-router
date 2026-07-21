@@ -95,7 +95,7 @@ def _cache_put(key: str, label: str, meta: dict | None, ttl: float = _LABEL_TTL_
 # lives in smart_route so streaming inherits it, and assess sees only cheap in-memory context (never
 # an engine/session) so it stays free on the hot path. The decision rides label_metadata under
 # "stick" — the one field that survives fallbacks — so it lands on the trace without touching
-# route_reason's label:<l> grammar. See docs/plans/2026-07-11-stickiness-metrics.md (chunk S1).
+# route_reason's label:<l> grammar.
 
 
 @dataclass
@@ -220,8 +220,8 @@ def record_warmth(conversation_key: str | None, tokens_cached: int, model: str |
 
 # Provider prompt-cache TTLs (seconds) — the re-routing window. The catalog entry's `cache_ttl_s`
 # is the source of truth when set; absent, we heuristically match the model-id family (same string
-# heuristic the runners use in _is_anthropic_family). Numbers from provider docs only
-# (docs/plans/2026-07-11-multi-model-caching.md): Anthropic 5min, OpenAI 30min (GPT-5.6+ guaranteed),
+# heuristic the runners use in _is_anthropic_family). Numbers from provider docs only:
+# Anthropic 5min, OpenAI 30min (GPT-5.6+ guaranteed),
 # DeepSeek best-effort ~24h, everything else 5min.
 _CACHE_TTL_DEFAULT = 300
 

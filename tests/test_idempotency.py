@@ -1,4 +1,4 @@
-"""Idempotency (engine-hardening Wave 2, docs/plans/engine-hardening/caching.md chunks A+B).
+"""Idempotency contract for the completion path.
 
 A client retry after a network blip must NOT double-execute a create (double token spend,
 duplicate task lists). Two layers:

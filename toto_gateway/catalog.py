@@ -24,15 +24,15 @@ class Price(BaseModel):
     prompt: float = 0.0  # USD per 1k prompt tokens
     completion: float = 0.0  # USD per 1k completion tokens
     # Cached prompt tokens (Usage.tokens_cached, a subset of prompt_tokens) bill at this fraction of
-    # the prompt rate — a provider prefix-cache read is ~0.1x input, not full price (verified per
-    # provider in docs/plans/2026-07-11-multi-model-caching.md). Optional; absent → 0.1, the
+    # the prompt rate — a provider prefix-cache read is ~0.1x input, not full price (verified
+    # per provider against published pricing). Optional; absent → 0.1, the
     # near-universal read discount. Set 1.0 to disable the discount for an entry.
     cache_read_multiplier: float = 0.1
     # Cached prompt tokens the provider WROTE this turn (Usage.tokens_cache_write) cost the base
     # prompt rate PLUS this multiplier's premium: total = base + write_tokens*prompt*(mult-1). A
     # write is more expensive than a plain input token (Anthropic 1.25x/5-min TTL). Optional; absent
     # → 1.0 (no premium — byte-identical cost for everyone whose provider doesn't charge one). Set
-    # 1.25 on Anthropic-family entries. See docs/plans/2026-07-11-multi-model-caching.md.
+    # 1.25 on Anthropic-family entries.
     cache_write_multiplier: float = 1.0
 
 
@@ -73,7 +73,7 @@ class CatalogEntry(BaseModel):
     context_window: int = 8192
     # Provider prompt-cache TTL (seconds): how long a warm prefix stays cheap upstream. The SOURCE
     # OF TRUTH for the warmth-aware re-routing window (routing.smart.cache_ttl_s); absent → a
-    # per-family heuristic default. See docs/plans/2026-07-11-multi-model-caching.md.
+    # per-family heuristic default.
     cache_ttl_s: int | None = None
     # frontier alias → concrete upstream model id (never hard-coded as "the smart one").
     upstream_model: str | None = None

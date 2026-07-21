@@ -275,5 +275,9 @@ async def chat_completions(
         "upstream_model": t.upstream_model, "credential_scope": t.credential_scope,
         # W2-C5: over-budget disposition on this served request (None = under/no budget).
         "budget_state": t.budget_state,
+        # Shadow-mode trajectory score (agentic turns only; None for plain chat) — mirrors the trace.
+        "trajectory_score": t.trajectory_score,
+        "trajectory_confidence": t.trajectory_confidence,
+        "trajectory_top": t.trajectory_top,
     }
     return result.response

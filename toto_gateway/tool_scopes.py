@@ -10,8 +10,7 @@ Overrides mirror driver/prompts.apply_overrides: an in-memory per-surface {add, 
 persisted to a JSON sibling file (TOTO_GW_SCOPES_FILE) so a dashboard edit survives a restart.
 effective_scope(surface) = code default + adds - removes. A dashboard edit is operator-authed,
 audited (routes/dev.scope_audit), and moves scope_hash(surface) — so a tool-set change is a
-first-class, filterable LangSmith variable next to a prompt commit
-(docs/plans/2026-07-05-tool-segmentation.md).
+first-class, filterable LangSmith variable next to a prompt commit.
 """
 
 from __future__ import annotations
@@ -59,7 +58,7 @@ SCOPES: dict[str, frozenset[str]] = {
 # Declared here so parity treats its absence from CORE as correct, not drift.
 GATED: dict[str, frozenset[str]] = {"mcp": frozenset({"spawn_local_swarm"})}
 
-# Custom-tools contract (docs/plans/2026-07-06-tool-contract.md §6). NEVER in CORE — flag-gated
+# Custom-tools contract. NEVER in CORE — flag-gated
 # (TOTO_GW_CUSTOM_TOOLS): the four authoring/dispatch verbs join every USER surface's scope when
 # the flag is on, and no job surface (extract/dream/driver) ever gets them. Union happens in
 # effective_scope so a flag flip moves scope_hash exactly like a prompt/scope commit.
@@ -67,7 +66,7 @@ CUSTOM: frozenset[str] = frozenset({
     "create_tool", "delete_tool", "run_custom_tool", "instantiate_template"})
 _CUSTOM_SURFACES = ("companion.text", "companion.voice", "mcp", "pi")
 
-# External tools (docs/plans/2026-07-06-pipedream-assessment.md) — the FIRST external tool surface,
+# External tools — the FIRST external tool surface,
 # read-only reads of a user's connected third-party accounts via the Pipedream Connect pilot. NEVER
 # in CORE; joins every USER surface (never a job surface) when the pilot is enabled AND configured.
 # Gated on the pilot's OWN condition (pipedream.enabled = TOTO_GW_PIPEDREAM + creds), not a second

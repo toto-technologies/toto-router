@@ -145,7 +145,7 @@ def redact_settings(settings) -> dict:
 def last4(value: str) -> str:
     """Last 4 chars of a secret, for eyeballing WHICH key is set — never more, and '' for
     values too short to safely truncate. Companion to redact_settings for the credentials
-    status panel (docs/plans/2026-07-04-credentials-surface.md P0)."""
+    status panel."""
     return value[-4:] if value and len(value) >= 8 else ""
 
 

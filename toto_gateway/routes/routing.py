@@ -8,7 +8,7 @@ Three read-only surfaces over the SAME decision the driver executes (never a sec
 
 `decide` calls Driver._decide_one — literally the function _dispatch_one runs before it executes —
 so a preview can never diverge from what /v1/route picks for the same input. Feedback/outcomes are
-NOT here: POST /v1/feedback already owns that plane. See docs/plans/2026-07-07-routing-api.md.
+NOT here: POST /v1/feedback already owns that plane.
 """
 
 from __future__ import annotations

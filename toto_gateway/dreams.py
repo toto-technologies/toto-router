@@ -1,4 +1,4 @@
-"""Dreams — the nightly memory-consolidation pass (docs/plans/2026-07-05-memory-lifecycle.md, P1).
+"""Dreams — the nightly memory-consolidation pass.
 
 Once a night, per active tenant, a background pass keeps the capture pile from rotting. Three legs,
 each budget-checked and each degrade-to-off:

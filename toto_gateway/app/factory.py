@@ -20,7 +20,8 @@ from ..obs import RequestContextMiddleware, init_sentry, redact_settings
 from ..routes import (
     admin_analytics, admin_catalog, admin_catalog_adoptions, admin_catalog_sync, admin_labeling,
     admin_latency, admin_providers, admin_requests, admin_routing, admin_usage, auth, chat,
-    credentials, custom_tools, health, metrics, models, prewarm, route, routing, sessions, tokens,
+    credentials, custom_tools, health, messages, metrics, models, prewarm, route, routing,
+    sessions, tokens,
 )
 from .background import (
     _audit_exporter, _backfill_embeddings, _backfill_notes, _benchmark_refresher, _calsync,
@@ -387,7 +388,7 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
     # Ambiguous routers default to the app plane (keep the gateway minimal); sessions/credentials/
     # custom_tools sit in gateway.
     plane_routers = {
-        "gateway": [health, metrics, auth, tokens, models, chat, prewarm, route, routing,
+        "gateway": [health, metrics, auth, tokens, models, chat, messages, prewarm, route, routing,
                     sessions, credentials, custom_tools,
                     admin_analytics, admin_catalog, admin_catalog_adoptions, admin_catalog_sync,
                     admin_labeling, admin_latency, admin_providers, admin_requests, admin_routing,

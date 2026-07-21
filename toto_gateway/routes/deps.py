@@ -260,6 +260,13 @@ async def _resolve_identity(request: Request) -> Identity:
     cookie → verified user, else unauthenticated."""
     settings = request.app.state.settings
     header = request.headers.get("authorization", "")
+    if not header:
+        # Anthropic-SDK clients (Claude Code, anthropic-python) authenticate with x-api-key
+        # instead of a bearer. Same credentials, different header name — alias it here so
+        # every downstream lookup (operator compare, user-token sha256) works unchanged.
+        key = request.headers.get("x-api-key", "")
+        if key:
+            header = f"Bearer {key}"
     if settings.auth_token:
         if hmac.compare_digest(header, f"Bearer {settings.auth_token}"):
             return OPERATOR

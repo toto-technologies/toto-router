@@ -1,4 +1,4 @@
-"""Context-caching P0 (docs/plans/2026-07-04-conversation-context-caching.md).
+"""Conversation context caching.
 
 Four planes, all offline:
   1. get_history block eviction with hysteresis — the rendered prefix is a byte-superset

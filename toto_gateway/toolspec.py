@@ -1,7 +1,6 @@
 """Toto Tool Contract (TTC v1) — validate / substitute / execute a declarative custom tool.
 
-A custom tool is ONE JSON document composing canonical tools (docs/plans/2026-07-06-tool-contract.md
-§1). There is no code-execution sandbox in v1: this module is pure validation, `{{params.x}}`
+A custom tool is ONE JSON document composing canonical tools. There is no code-execution sandbox in v1: this module is pure validation, `{{params.x}}`
 substitution, and a linear walk of steps through a caller-provided async dispatch fn. Every rule
 is enforced at CREATE and at RUN — an imported spec gets no bypass (§1). Template expansion
 (§4) lives here too so the REST route and the companion tool share ONE code path.

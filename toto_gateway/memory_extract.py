@@ -1,4 +1,4 @@
-"""Memory extraction — the post-capture distiller (docs/plans/2026-07-05-memory-lifecycle.md, P0).
+"""Memory extraction — the post-capture distiller.
 
 Raw captures (a chat turn, a session outcome) already land in the recall plane. This turns them
 into DURABLE TYPED FACTS in the declared plane (user_memory), written through the SAME path the

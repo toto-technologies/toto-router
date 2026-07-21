@@ -3,13 +3,13 @@ name = "toto-router"
 version = "0.2.0"
 description = "OpenAI-compatible LLM gateway with a routing brain and full per-request provenance."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "FSL-1.1-ALv2" }
 authors = [{ name = "Toto" }]
 
 # Dependency discipline (context doc §9, §14.8): a routing-adjacent tool (LiteLLM)
 # shipped credential-stealing malware on PyPI in 2026. We deliberately do NOT depend
-# on LiteLLM. Versions are floor-pinned here and EXACT-pinned in requirements.lock
+# on LiteLLM. Versions are floor-pinned here; deployment images pin exact hashes separately
 # (generated from a real resolve). Treat dependency bumps as reviewed code changes.
 dependencies = [
     "fastapi>=0.138,<0.139",
@@ -27,7 +27,7 @@ dependencies = [
     # The driver plane (LangGraph state machine): /v1/route + /v1/sessions execute the graph,
     # so this is a runtime dep. langsmith stays optional (BYO tracing, env-gated).
     "langgraph>=1.2,<2",
-    # Postgres cutover (docs/plans production-infra Decision 1): the stores run on Postgres when
+    # Postgres cutover: the stores run on Postgres when
     # TOTO_GW_DATABASE_URL is set. [binary] ships the libpq wheel; [pool] is the P1 async upgrade.
     "psycopg[binary,pool]>=3.2,<4",
     # Error tracking (infra P1). Init is gated on TOTO_GW_SENTRY_DSN — the dep is installed but
@@ -57,6 +57,10 @@ dependencies = [
     # sentry-sdk above. Two packages because the SDK and the wire exporter version independently.
     "opentelemetry-sdk>=1.29,<2",
     "opentelemetry-exporter-otlp>=1.29,<2",
+    # Rust wire-format translation (OpenAI Chat <-> Anthropic Messages, incl. streaming
+    # state machine) for the /v1/messages surface. Core package only; the `switchyard`
+    # Python proxy framework in the same wheel is unused.
+    "nemo-switchyard>=0.1.0,<0.2",
 ]
 
 [project.optional-dependencies]

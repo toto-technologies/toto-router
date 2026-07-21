@@ -564,7 +564,7 @@ def parse_tasks(text: str) -> list[dict]:
 
 # --- Prompt-surface registry + override seam ----------------------------------
 # The code-side twin of docs/prompt-map.md (same surfaces, same order) and the enabling
-# seam for the dev dashboard (docs/plans/2026-07-04-prompt-dashboard.md P0): a JSON file
+# seam for the dev dashboard: a JSON file
 # {surface_name: text} pointed at by TOTO_GW_PROMPTS_FILE overrides any surface below
 # WITHOUT editing code or restarting — core.py and the message builders read these module
 # attributes at call time, so setattr here takes effect on the very next LLM call.

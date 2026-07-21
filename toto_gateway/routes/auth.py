@@ -3,8 +3,7 @@
 Enumeration-safe: register/resend always return the same generic 200 whether or not the email
 is new, and login returns one generic 401 for both unknown-email and wrong-password (burning a
 dummy scrypt on the unknown-email path so timing doesn't leak existence). Rate-limited per client
-IP. Google OAuth + real SMTP are P1 — mailer.py and the settings are shaped for them to drop in.
-See docs/plans/2026-07-02-user-accounts-auth.md.
+IP. Google OAuth + real SMTP are unbuilt — mailer.py and the settings are shaped for them to drop in.
 """
 
 from __future__ import annotations

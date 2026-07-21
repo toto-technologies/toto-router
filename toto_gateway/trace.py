@@ -103,6 +103,11 @@ class TraceRecord(BaseModel):
     label_metadata: str | None = None
     # --- Phase 1: the routing decision, logged so the rail can show WHY a lane was chosen ---
     route_reason: str | None = None  # human-readable route reason (catalog | exemplar:… | guard:…)
+    # Shadow-mode trajectory signals (agentic turns only; None for plain chat): the run-stage score
+    # this turn would have routed on if trajectory routing were live. Computed, never acted on.
+    trajectory_score: float | None = None
+    trajectory_confidence: float | None = None
+    trajectory_top: str | None = None
     cache_hit: bool = False
     guard_action: str | None = None  # allow | downgrade_local | block
     signal_intent: str | None = None
@@ -226,6 +231,9 @@ class TraceRow(SQLModel, table=True):
     credential_scope: str | None = SQLField(default=None, index=True)
     label_metadata: str | None = None                          # JSON: totoshape metadata (work-map)
     route_reason: str | None = None
+    trajectory_score: float | None = None       # shadow-mode run-stage score (None = non-agentic)
+    trajectory_confidence: float | None = None
+    trajectory_top: str | None = None           # top-contributing dimension name
     cache_hit: bool = False
     guard_action: str | None = None
     signal_intent: str | None = None

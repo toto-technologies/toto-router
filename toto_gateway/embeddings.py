@@ -3,7 +3,7 @@
 OpenRouter's embeddings endpoint (existing OPENROUTER_API_KEY) via the AsyncOpenAI client, same
 plumbing as the OpenAI runner. Everything degrades to None so the caller falls back to the
 keyword classifier: no key, provider down, or a hard timeout all return None, never raise.
-See docs/plans/2026-07-02-embedding-rag-routing.md. Pure-Python cosine — no numpy dep at our
+Pure-Python cosine — no numpy dep at our
 scale (three centroids, dozens of tasks). Answers are never embedded; only task text.
 """
 

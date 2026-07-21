@@ -3,7 +3,7 @@
 Configured (TOTO_GW_SMTP_HOST set): send a STARTTLS email, blocking send pushed off the event
 loop via anyio.to_thread. Unconfigured (dev): print the verify link to stdout so local flows
 work with no mail server. Links are NEVER returned in an API response — the token only ever
-travels to the inbox (or the dev console). See docs/plans (Decision 7).
+travels to the inbox (or the dev console).
 """
 
 from __future__ import annotations

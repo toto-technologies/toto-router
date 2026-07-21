@@ -2,7 +2,7 @@
 
 Lives in core (not companion.prompts) so core modules (toolspec, tool_scopes) can import it
 top-level with no cycle and no companion dependency: the OSS export deletes companion/ wholesale
-(edition seam, docs/plans/2026-07-14-oss-edition.md), so nothing core may import from it.
+(edition seam), so nothing core may import from it.
 companion.prompts re-exports TOOL_NAMES from here — companion depends on core, never the reverse.
 """
 

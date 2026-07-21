@@ -8,6 +8,10 @@ Two concerns are kept rigorously correct here because nothing downstream can fix
      (`cost_estimated` stays honest).
   2. Routing tax — `latency_ms_gateway_overhead` = total wall minus the upstream's own wall,
      so we measure exactly what the gateway adds.
+
+Reading order: `complete()` is the non-streaming request lifecycle end to end; `stream()` is
+the same lifecycle with the dispatch loop replaced by hand-driven chunk iteration. Everything
+else is a helper for one stage of those two paths.
 """
 
 from __future__ import annotations
@@ -45,6 +49,7 @@ from .pipeline import (
 )
 from .pricing import compute_cost_usd
 from .resilience import backoff as _backoff
+from .routing import trajectory
 from .routing.decision import effective_policy, resolve_fail_policy
 from .routing.candidates import (
     CandidateCatalog,
@@ -71,6 +76,9 @@ from .tokens import estimate_prompt_tokens, estimate_tokens
 from .trace import TraceRecord, TraceWriter, sql_engine, write_request_content
 
 
+# --- errors ------------------------------------------------------------------
+
+
 class StreamStallError(Exception):
     """A streamed upstream opened then went silent past the inter-chunk deadline — we abandon it
     (close upstream, finalize the trace as error=stream_stall) rather than hold the slot."""
@@ -94,6 +102,9 @@ class BudgetExceededError(Exception):
     def __init__(self, decision) -> None:
         super().__init__("budget_exceeded")
         self.decision = decision  # BudgetDecision (pct/spend/monthly_usd/scope for the error body)
+
+
+# --- module helpers ----------------------------------------------------------
 
 
 def _new_request_id() -> str:
@@ -141,6 +152,12 @@ class GatewayResult:
 
 
 class Gateway:
+    # --- construction --------------------------------------------------------
+    #
+    # Every capability beyond the bare passthrough is injected here and defaults to off /
+    # no-op, so a Gateway built with only (catalog, registry, writer) is the plain proxy.
+    # The app factory wires the real defaults from settings.
+
     def __init__(
         self,
         catalog: Catalog,
@@ -229,6 +246,8 @@ class Gateway:
         # TTL-aware incumbent hold: when True, smart_route keeps a conversation's warm
         # model over a fresh pick while its provider prefix cache is live. False → fresh every turn.
         self._warmth_routing = warmth_routing
+
+    # --- catalog & model resolution ------------------------------------------
 
     @property
     def benchmarks(self):
@@ -511,12 +530,21 @@ class Gateway:
         smart.record_warmth(trace.conversation_key, usage.tokens_cached, entry.id)
 
     def _stamp_decision(self, trace, signal: Signal, decision: Decision, guard_action: str,
-                        data_label: str | None = None) -> None:
+                        data_label: str | None = None, req: ChatCompletionRequest | None = None) -> None:
         trace.route_reason = decision.reason
         trace.guard_action = guard_action
         trace.data_label = data_label  # the org data classification (None when no taxonomy)
         trace.signal_intent = signal.intent if signal.intent != "unknown" else None
         trace.signal_complexity = signal.complexity if signal.complexity != "unknown" else None
+        # Shadow-mode trajectory score: computed on the shared decision choke point both planes
+        # traverse, stamped for observability, never routed on. None for non-agentic traffic.
+        if req is not None:
+            sig = trajectory.extract(req.messages)
+            if sig is not None:
+                ts = trajectory.score(sig)
+                trace.trajectory_score = ts.score
+                trace.trajectory_confidence = ts.confidence
+                trace.trajectory_top = ts.top_contribution
 
     # --- denial trace rows ---------------------------------------------------
 
@@ -838,7 +866,7 @@ class Gateway:
                 cand_entry, request_id=request_id, stream=False, harness=harness, task_id=task_id,
                 identity=identity, conversation_key=conv_key,
             )
-            self._stamp_decision(trace, signal, decision, guard_action, data_label)
+            self._stamp_decision(trace, signal, decision, guard_action, data_label, req)
             trace.classify_ms, trace.plan_ms = classify_ms, plan_ms  # per-stage timings
             trace.budget_state = budget_state  # over-budget observe/downgrade stamp
             # A fallback served because the primary's breaker was open is a "breaker_open"
@@ -1032,7 +1060,7 @@ class Gateway:
             entry, request_id=request_id, stream=True, harness=harness, task_id=task_id,
             identity=identity, conversation_key=conv_key,
         )
-        self._stamp_decision(trace, signal, decision, guard_action, data_label)
+        self._stamp_decision(trace, signal, decision, guard_action, data_label, req)
         trace.classify_ms, trace.plan_ms = classify_ms, plan_ms  # per-stage timings
         trace.budget_state = budget_state  # over-budget observe/downgrade stamp
         trace.degraded_mode = degraded_reason  # fail-open served the floor; record it
