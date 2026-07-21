@@ -1,5 +1,9 @@
 # toto-router
 
+Model selection is hard and routing between the models is challenging. Intelligence is a commodity
+it's time you had the ability to use it as such.  The router runs entirely locally, pulls catalogs 
+from major gateways and providers. Configure your own task routing as you see fit. 
+
 An LLM gateway with a routing brain that speaks both major wire formats. It sits between your
 client and upstream model providers (Anthropic, OpenAI/OpenRouter, local MLX or any
 OpenAI-compatible server), forwards requests, and records a complete provenance trace for
@@ -146,3 +150,5 @@ This is the single-tenant gateway; multi-tenant and organization features live i
 
 [MIT](LICENSE). Use it freely — internally, commercially, modified or not. See the LICENSE
 file for the exact terms.
+
+brought to you by alex funk at toto technologies - www.toto.tech
