@@ -116,8 +116,17 @@ def _build_labels(settings: Settings, catalog):
     if catalog.get(settings.label_classifier_model) is None:
         errs.append(f"classifier model {settings.label_classifier_model!r} not in catalog")
     if errs:
-        logging.getLogger("toto_gateway.routing").error(
-            "label routing disabled: %s", "; ".join(errs))
+        # Expected on the plain default catalog (no provider key) — a degraded mode, not a fault.
+        # WARNING with the exact fix, so a fresh clone learns the one env var to set from the log.
+        import os
+
+        hint = ("set OPENROUTER_API_KEY and restart to enable smart routing with the bundled "
+                "OpenRouter catalog" if not os.environ.get("OPENROUTER_API_KEY")
+                else "point TOTO_GW_CATALOG at a catalog that carries these models "
+                "(e.g. catalog.openrouter.yaml)")
+        logging.getLogger("toto_gateway.routing").warning(
+            "smart task-type routing disabled — requests still serve via the fallback router. "
+            "Cause: %s. To fix: %s.", "; ".join(errs), hint)
         return None
     return labels
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,8 +27,12 @@ class Settings(BaseSettings):
     pool_max: int = 20
     pool_timeout: float = 10.0
 
-    # Catalog
-    catalog: str = "catalog.yaml"
+    # Catalog. Empty (unset) resolves at validation: catalog.openrouter.yaml when
+    # OPENROUTER_API_KEY is in the environment (so a fresh clone with just that key gets working
+    # smart routing — the shipped labels.yaml binds OpenRouter entries), else catalog.yaml.
+    # An explicit TOTO_GW_CATALOG always wins. os.environ is the right lookup: runners read the
+    # provider key from there too (never from .env), so the default tracks what dispatch can use.
+    catalog: str = ""
     # Offline leaderboard scores keyed by upstream model (refreshed by
     # scripts/fetch_benchmarks.py). Missing file is fine — routing degrades gracefully.
     benchmarks: str = "benchmarks.yaml"
@@ -568,6 +573,17 @@ class Settings(BaseSettings):
     # model is always reported back in response.x_toto.model. Same-model retry is independent
     # of this flag.
     passthrough_fallback: bool = True
+
+    @model_validator(mode="after")
+    def _default_catalog(self) -> "Settings":
+        """Resolve an unset catalog (see the `catalog` field comment). Runs after env/.env/kwargs,
+        so every consumer reads the resolved path."""
+        if not self.catalog:
+            import os
+
+            self.catalog = ("catalog.openrouter.yaml" if os.environ.get("OPENROUTER_API_KEY")
+                            else "catalog.yaml")
+        return self
 
     def provider_timeout(self, *, local: bool = False):
         """Explicit httpx.Timeout for a provider client — replaces the SDK's unbounded 600s read

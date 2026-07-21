@@ -39,6 +39,7 @@
     getEffectiveModels,
     getCatalogModels,
     getFireworksSync,
+    deleteAdoption,
   } from '$lib/api/admin.js';
   import { toFailMatrix, failPolicyBody } from '$lib/failpolicy.js';
   import SegmentedControl from '$lib/components/SegmentedControl.svelte';
@@ -394,13 +395,14 @@
     }
   }
 
-  // ---- Add custom task type (CT) modal -------------------------------------------------------
+  // ---- Add / edit custom task type (CT) modal ------------------------------------------------
   let addOpen = $state(false);
   let ctName = $state('');
   let ctDesc = $state('');
   let ctModel = $state('');
   let ctErr = $state(null); // {field?, message}
   let ctSaving = $state(false);
+  let ctEditing = $state(null); // name of the custom task type being edited (null = adding)
 
   // Backend 400 codes → which field the inline error hangs under.
   const CT_FIELD = {
@@ -412,37 +414,89 @@
   };
 
   function openAdd() {
+    ctEditing = null;
     ctName = '';
     ctDesc = '';
-    ctModel = allModelIds.find((id) => allowed.has(id)) ?? allModelIds[0] ?? '';
+    // Prefer a REAL allowed model — an echo/fake test entry is never a sensible binding default.
+    const pickable = allModelIds.filter((id) => allowed.has(id));
+    ctModel = pickable.find((id) => modelById.get(id)?.endpoint !== 'fake')
+      ?? pickable[0] ?? allModelIds[0] ?? '';
     ctErr = null;
     addOpen = true;
+  }
+  function openEdit(name) {
+    const c = customLabels.find((c) => c.name === name);
+    if (!c) return;
+    ctEditing = c.name;
+    ctName = c.name;
+    ctDesc = c.desc;
+    ctModel = routeSel[c.name] ?? c.model;
+    ctErr = null;
+    addOpen = true;
+  }
+  // Shared save for add / edit / remove: PUT the policy with `list` as the custom set, then
+  // reload so the re-seed reflects server truth (same contract the Add flow always had).
+  async function saveCustomList(list) {
+    const body = routingBody(list);
+    if (isOrg) {
+      await putOrgRoutingPolicy(body, orgId || undefined);
+      await routingQ.reload();
+    } else {
+      await putRoutingPolicy(teamId, body, orgId || undefined);
+      await Promise.all([routingQ.reload(), catalogQ.reload()]);
+    }
   }
   async function submitCustom() {
     ctSaving = true;
     ctErr = null;
     const entry = { name: ctName.trim(), desc: ctDesc.trim(), model: ctModel };
+    // The table dropdown may hold a stale pick for this name — the modal's choice wins
+    // (routingBody reads routeSel first for custom rows).
+    routeSel = { ...routeSel, [entry.name]: entry.model };
     try {
-      const body = routingBody([...customLabels, entry]);
-      if (isOrg) {
-        await putOrgRoutingPolicy(body, orgId || undefined);
-        await routingQ.reload();
-      } else {
-        await putRoutingPolicy(teamId, body, orgId || undefined);
-        await Promise.all([routingQ.reload(), catalogQ.reload()]); // re-seed picks up the new row
-      }
+      await saveCustomList(
+        ctEditing ? customLabels.map((c) => (c.name === ctEditing ? entry : c))
+                  : [...customLabels, entry]);
       addOpen = false;
     } catch (e) {
-      ctErr = { field: CT_FIELD[e?.code], message: e?.message ?? 'Could not add task type' };
+      ctErr = { field: CT_FIELD[e?.code], message: e?.message ?? 'Could not save task type' };
     } finally {
       ctSaving = false;
+    }
+  }
+
+  // Remove is two-click (arm, then confirm) and saves immediately, mirroring Add.
+  let removeArm = $state(null); // custom task-type name armed for removal
+  let removing = $state(null);
+  async function removeCustom(name) {
+    if (removeArm !== name) {
+      removeArm = name;
+      return;
+    }
+    removeArm = null;
+    removing = name;
+    // Drop the label's per-type hold too — the PUT rejects a stick_ttls key for a label the
+    // body no longer defines.
+    const holds = { ...stickSel };
+    delete holds[name];
+    stickSel = holds;
+    try {
+      await saveCustomList(customLabels.filter((c) => c.name !== name));
+    } catch (e) {
+      saveErr = e?.message ?? 'Could not remove task type';
+    } finally {
+      removing = null;
     }
   }
 
   // ---- Section B · provider-module catalog + Section C · Fireworks sync ----------------------
   // Both are org-wide reads, independent of the scope selector. The sync endpoint is always-200:
   // key-missing and upstream failure arrive as {key_present, error} data, never as query errors.
-  const catQ = query(() => getCatalogModels(), { isEmpty: (d) => !d?.models?.length });
+  // OSS reads the EFFECTIVE catalog (base + the local scope's adoptions, same row shape) so an
+  // adopted model shows up here, not only in the binding dropdowns; enterprise keeps the global
+  // shipped-catalog view (effective-models needs a named scope the operator may not have).
+  const catQ = query(() => (OSS ? getEffectiveModels() : getCatalogModels()),
+                     { isEmpty: (d) => !d?.models?.length });
   const syncQ = query(() => getFireworksSync(), { isEmpty: () => false });
   const providerGroups = $derived(groupByProvider(catQ.data?.models ?? []));
   const sync = $derived(syncQ.data);
@@ -480,6 +534,65 @@
 
   // The model LIBRARY (discovery panels) moved to /models — this page keeps the curated
   // catalog view; the Fireworks sync panel's Adopt/Fix ref still uses the YAML modal above.
+
+  // ---- Remove an adopted model (Section B rows with source === 'adopted') --------------------
+  // Base catalog models are YAML-owned and not removable here; adoptions are DB rows with a
+  // DELETE endpoint. The confirm modal names every task type pointing at the model and reverts
+  // them on confirm — a dangling binding would silently fall back at dispatch, but leaving it
+  // stored is exactly the stale-binding mess the routing view has to flag.
+  let removeAdoptedOpen = $state(false);
+  let removeTarget = $state(null); // the section-B catalog row being removed
+  let removingAdopted = $state(false);
+  let removeAdoptedErr = $state(null);
+
+  // Task types currently pointing at `id` in the EDITED view (what the user sees on this page).
+  function bindingsOn(id) {
+    const builtins = (routingQ.data?.labels ?? []).filter(
+      (r) => !r.custom && r.bindable && (routeSel[r.label] ?? r.model) === id);
+    const customs = customLabels.filter((c) => (routeSel[c.name] ?? c.model) === id);
+    return { builtins, customs };
+  }
+  function openRemoveAdopted(m) {
+    removeTarget = m;
+    removeAdoptedErr = null;
+    removeAdoptedOpen = true;
+  }
+  const removeAffected = $derived(
+    removeTarget ? bindingsOn(removeTarget.id) : { builtins: [], customs: [] });
+  // Where a custom type lands when its model is removed: the Generalist's (post-revert) pick —
+  // the designated catch-all. A custom type can't go unbound (the policy PUT requires a model).
+  const removeFallback = $derived.by(() => {
+    if (!removeTarget) return null;
+    const other = (routingQ.data?.labels ?? []).find((r) => r.label === 'other');
+    const cur = routeSel['other'] ?? other?.model;
+    return cur === removeTarget.id ? other?.default_model : cur;
+  });
+  async function confirmRemoveAdopted() {
+    removingAdopted = true;
+    removeAdoptedErr = null;
+    const id = removeTarget.id;
+    try {
+      const { builtins, customs } = bindingsOn(id);
+      const classifierHit = classifierModel === id;
+      if (builtins.length || customs.length || classifierHit) {
+        const sel = { ...routeSel };
+        for (const r of builtins) sel[r.label] = r.default_model;
+        const fb = removeFallback;
+        for (const c of customs) sel[c.name] = fb;
+        routeSel = sel;
+        if (classifierHit) classifierModel = '';
+        await saveCustomList(customLabels.map((c) =>
+          customs.some((x) => x.name === c.name) ? { ...c, model: fb } : c));
+      }
+      await deleteAdoption(id);
+      await Promise.all([modelsQ.reload(), catQ.reload()]);
+      removeAdoptedOpen = false;
+    } catch (e) {
+      removeAdoptedErr = e?.message ?? 'Could not remove the model';
+    } finally {
+      removingAdopted = false;
+    }
+  }
 </script>
 
 <svelte:head><title>Catalog &amp; Routing · Toto Control</title></svelte:head>
@@ -720,7 +833,20 @@
                   <td>
                     <div class="dfltcell">
                       {#if row.custom}
-                        <span class="chip ovr" title="Team-defined task type">team-defined</span>
+                        <div class="ctacts">
+                          <button class="btn small ghost" title="Edit this task type’s description or model"
+                            onclick={() => openEdit(row.label)}>Edit</button>
+                          <button
+                            class="btn small ghost danger"
+                            class:armed={removeArm === row.label}
+                            disabled={removing === row.label}
+                            title="Remove this task type"
+                            onblur={() => removeArm === row.label && (removeArm = null)}
+                            onclick={() => removeCustom(row.label)}
+                          >
+                            {removing === row.label ? 'Removing…' : removeArm === row.label ? 'Really remove?' : 'Remove'}
+                          </button>
+                        </div>
                       {:else}
                         <span class="dm">
                           default {prettyId(row.default_model)}{allowed.has(row.default_model) ? '' : ' · denied here'}
@@ -810,6 +936,7 @@
                     <div class="mname">
                       {displayName(m)}
                       {#if m.fine_tuned}<span class="ftbadge">Fine-tuned · yours</span>{/if}
+                      {#if m.source === 'adopted'}<span class="ftbadge">Added by you</span>{/if}
                     </div>
                     <div class="malias">
                       <span class="idchip n">{m.id}</span>
@@ -827,6 +954,16 @@
                     {/if}
                   </td>
                   <td class="dcol">
+                    {#if m.source === 'adopted'}
+                      <button
+                        class="disclose rmadopt"
+                        title="Remove from catalog"
+                        aria-label="Remove {m.id} from catalog"
+                        onclick={() => openRemoveAdopted(m)}
+                      >
+                        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                      </button>
+                    {/if}
                     <button
                       class="disclose"
                       class:open={expanded.has(m.id)}
@@ -1088,12 +1225,23 @@
   {/if}
 {/if}
 
-<!-- ===== Add custom task type (CT) ===== -->
-<Modal bind:open={addOpen} title="Add task type" subtitle="Define a custom task type for the {teamName} team.">
+<!-- ===== Add / edit custom task type (CT) ===== -->
+<Modal
+  bind:open={addOpen}
+  title={ctEditing ? 'Edit task type' : 'Add task type'}
+  subtitle={ctEditing
+    ? `Change what “${ctEditing}” covers or which model it uses.`
+    : OSS
+      ? 'Define a custom task type for this gateway.'
+      : isOrg
+        ? 'Define a custom task type for this organization.'
+        : `Define a custom task type for the ${teamName} team.`}
+>
   <div class="field">
     <label for="ct-name">Name (slug)</label>
-    <input id="ct-name" bind:value={ctName} placeholder="invoice_parsing" spellcheck="false" />
+    <input id="ct-name" bind:value={ctName} placeholder="invoice_parsing" spellcheck="false" disabled={!!ctEditing} />
     {#if ctErr?.field === 'name'}<div class="fielderr">{ctErr.message}</div>{/if}
+    {#if ctEditing}<div class="fieldnote">The name is this task type’s identity — remove and re-add to rename.</div>{/if}
   </div>
   <div class="field">
     <label for="ct-desc">Description</label>
@@ -1114,7 +1262,42 @@
   {#snippet footer()}
     <button class="btn ghost" onclick={() => (addOpen = false)}>Cancel</button>
     <button class="btn primary" disabled={ctSaving || !ctName.trim() || !ctDesc.trim() || !ctModel} onclick={submitCustom}>
-      {ctSaving ? 'Adding…' : 'Add task type'}
+      {ctSaving ? 'Saving…' : ctEditing ? 'Save changes' : 'Add task type'}
+    </button>
+  {/snippet}
+</Modal>
+
+<!-- ===== Remove adopted model (Section B) ===== -->
+<Modal
+  bind:open={removeAdoptedOpen}
+  title="Remove from catalog"
+  subtitle={removeTarget
+    ? `“${displayName(removeTarget)}” (${removeTarget.id}) was added from the ${providerLabel(removeTarget.provider)} library.`
+    : ''}
+>
+  {#if removeAffected.builtins.length || removeAffected.customs.length}
+    <div class="rmwarn">
+      <b>Task types currently using this model</b>
+      <ul>
+        {#each removeAffected.builtins as r (r.label)}
+          <li><span class="n">{r.label === 'other' ? 'Generalist' : r.label}</span> — reverts to its default, {prettyId(r.default_model)}</li>
+        {/each}
+        {#each removeAffected.customs as c (c.name)}
+          <li><span class="n">{c.name}</span> (custom) — will use {prettyId(removeFallback)}</li>
+        {/each}
+      </ul>
+    </div>
+  {:else}
+    <p class="rmnote">No task types point at this model. It disappears from the catalog and every model picker.</p>
+  {/if}
+  {#if removeTarget && classifierModel === removeTarget.id}
+    <p class="rmnote">This model also reads your prompts to route them — that resets to the platform default.</p>
+  {/if}
+  {#if removeAdoptedErr}<div class="fielderr">{removeAdoptedErr}</div>{/if}
+  {#snippet footer()}
+    <button class="btn ghost" onclick={() => (removeAdoptedOpen = false)}>Cancel</button>
+    <button class="btn primary" disabled={removingAdopted} onclick={confirmRemoveAdopted}>
+      {removingAdopted ? 'Removing…' : 'Remove model'}
     </button>
   {/snippet}
 </Modal>
@@ -1199,6 +1382,42 @@
     margin-top: 6px;
     font-size: 0.71875rem;
     color: var(--crit);
+  }
+  /* Custom task-type row actions (Default column — a custom type has no default to show). */
+  .ctacts {
+    display: flex;
+    gap: 6px;
+  }
+  /* Adopted-row remove: the disclose icon-button family, danger on hover. */
+  .rmadopt:hover {
+    color: var(--crit);
+    background: var(--crit-soft);
+  }
+  .rmwarn {
+    padding: 10px 12px;
+    border: 1px solid var(--warn);
+    background: var(--warn-soft);
+    border-radius: 9px;
+    font-size: 0.78125rem;
+  }
+  .rmwarn ul {
+    margin: 6px 0 0;
+    padding-left: 18px;
+  }
+  .rmwarn li {
+    margin: 2px 0;
+  }
+  .rmnote {
+    margin: 8px 0 0;
+    font-size: 0.78125rem;
+    color: var(--text-2);
+  }
+  .btn.danger {
+    color: var(--crit);
+  }
+  .btn.danger.armed {
+    border-color: var(--crit);
+    background: var(--crit-soft);
   }
   /* operator org picker (tuning-page pattern) */
   .orgform {
