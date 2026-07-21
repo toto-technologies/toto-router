@@ -7,22 +7,24 @@ Never 500s the console: a missing key or a provider hiccup returns 200 with `err
 
 from __future__ import annotations
 
-import os
 import time
 
 from fastapi import APIRouter, Depends, Request
 
 from ..catalog_sync import (
+    fetch_anthropic_library,
     fetch_cloudflare_library,
     fetch_fireworks,
     fetch_fireworks_library,
     fetch_openrouter,
     probe_availability,
     reconcile,
+    reconcile_anthropic_library,
     reconcile_cloudflare_library,
     reconcile_fireworks_library,
     reconcile_openrouter,
 )
+from ..credentials import stored_or_env
 from .deps import Identity, require_read_role, require_role
 
 router = APIRouter(tags=["admin"])
@@ -33,7 +35,7 @@ _EMPTY = {"account_models": [], "deployments": [], "catalog_entries": [], "drift
 @router.get("/v1/admin/catalog/sync/fireworks")
 async def sync_fireworks(request: Request,
                          identity: Identity = Depends(require_read_role("member"))):
-    key = os.environ.get("FIREWORKS_API_KEY")
+    key = stored_or_env("FIREWORKS_API_KEY")
     base = {"provider": "fireworks", "account": None, "checked_at": time.time()}
     if not key:
         return {**base, "key_present": False, "error": "FIREWORKS_API_KEY not configured", **_EMPTY}
@@ -52,7 +54,7 @@ async def discover_openrouter(request: Request,
                               identity: Identity = Depends(require_read_role("member"))):
     """Explore ALL OpenRouter models (not just the cataloged few), each flagged cataloged/catalog_id.
     Public endpoint — a missing key is not an error (the key is sent when present, for rate limits)."""
-    key = os.environ.get("OPENROUTER_API_KEY")
+    key = stored_or_env("OPENROUTER_API_KEY")
     fetched = await fetch_openrouter(key)
     models = reconcile_openrouter(
         request.app.state.gateway.catalog_for(identity).models, fetched["models"])
@@ -66,7 +68,7 @@ async def discover_fireworks(request: Request,
     """Explore the whole Fireworks model library (the `fireworks` platform account), each flagged
     cataloged/catalog_id. Needs the key (unlike OpenRouter). `filtered_out` = deprecated/embedding/
     non-READY entries hidden."""
-    key = os.environ.get("FIREWORKS_API_KEY")
+    key = stored_or_env("FIREWORKS_API_KEY")
     base = {"provider": "fireworks", "checked_at": time.time()}
     if not key:
         return {**base, "key_present": False, "error": "FIREWORKS_API_KEY not configured",
@@ -84,8 +86,8 @@ async def discover_cloudflare(request: Request,
     """Explore the Cloudflare Workers AI text-generation catalog, each flagged cataloged/catalog_id.
     Needs BOTH CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID (the two-part credential); either
     missing → key_present:false, graceful empty (same idiom as Fireworks' no-key state)."""
-    token = os.environ.get("CLOUDFLARE_API_TOKEN")
-    account = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
+    token = stored_or_env("CLOUDFLARE_API_TOKEN")
+    account = stored_or_env("CLOUDFLARE_ACCOUNT_ID")
     base = {"provider": "cloudflare", "checked_at": time.time()}
     if not token or not account:
         return {**base, "key_present": False,
@@ -93,6 +95,24 @@ async def discover_cloudflare(request: Request,
                 "total": 0, "filtered_out": 0, "models": []}
     fetched = await fetch_cloudflare_library(token, account)
     models = reconcile_cloudflare_library(
+        request.app.state.gateway.catalog_for(identity).models, fetched["models"])
+    return {**base, "key_present": True, "error": fetched["error"], "total": len(models),
+            "filtered_out": fetched["filtered_out"], "models": models}
+
+
+@router.get("/v1/admin/catalog/discovery/anthropic")
+async def discover_anthropic(request: Request,
+                             identity: Identity = Depends(require_read_role("member"))):
+    """Explore Anthropic's model list (native x-api-key auth — the generic Bearer availability
+    probe can't cover this provider), each flagged cataloged/catalog_id. Needs the key; missing →
+    key_present:false, graceful empty (same idiom as Fireworks' no-key state)."""
+    key = stored_or_env("ANTHROPIC_API_KEY")
+    base = {"provider": "anthropic", "checked_at": time.time()}
+    if not key:
+        return {**base, "key_present": False, "error": "ANTHROPIC_API_KEY not configured",
+                "total": 0, "filtered_out": 0, "models": []}
+    fetched = await fetch_anthropic_library(key)
+    models = reconcile_anthropic_library(
         request.app.state.gateway.catalog_for(identity).models, fetched["models"])
     return {**base, "key_present": True, "error": fetched["error"], "total": len(models),
             "filtered_out": fetched["filtered_out"], "models": models}

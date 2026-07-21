@@ -367,6 +367,65 @@ def reconcile_cloudflare_library(entries: list[CatalogEntry], models: list[dict]
     return sorted(models, key=lambda m: m["slug"])
 
 
+# --- Anthropic direct-API library discovery ---------------------------------------------------
+
+ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models"
+ANTHROPIC_VERSION = "2023-06-01"  # the stable version the anthropic SDK pins for /v1/messages
+
+
+def map_anthropic_model(m: dict) -> dict | None:
+    """One Anthropic /v1/models entry → our lean shape (cataloged/catalog_id filled by reconcile).
+    The endpoint returns only id/display_name/created_at — no context, price, or capability
+    fields — so those stay 0/False (unknown, not claims); an admin refines after adopting, same
+    as the Fireworks library."""
+    slug = m.get("id", "")
+    if not slug:
+        return None
+    return {"slug": slug, "name": m.get("display_name") or slug,
+            "context_window": 0, "price_in": 0.0, "price_out": 0.0,
+            "tools": False, "vision": False, "cataloged": False, "catalog_id": None}
+
+
+async def fetch_anthropic_library(api_key: str) -> dict:
+    """List Anthropic's model catalog (GET /v1/models). Anthropic's native auth is x-api-key +
+    anthropic-version — not Bearer, which is why the generic availability probe can't cover this
+    provider. Paginates via has_more/last_id. Returns {models, filtered_out, error}; never raises
+    — HTTP failure → error set, models empty."""
+    models, error = [], None
+    headers = {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION}
+    try:
+        async with httpx.AsyncClient(timeout=30, headers=headers) as client:
+            after = None
+            while True:
+                params: dict[str, Any] = {"limit": 100}
+                if after:
+                    params["after_id"] = after
+                resp = await client.get(ANTHROPIC_MODELS_URL, params=params)
+                resp.raise_for_status()
+                body = resp.json()
+                for raw in body.get("data") or []:
+                    row = map_anthropic_model(raw)
+                    if row is not None:
+                        models.append(row)
+                after = body.get("last_id")
+                if not body.get("has_more") or not after:
+                    break
+    except httpx.HTTPError as e:
+        return {"models": [], "filtered_out": 0, "error": f"anthropic API error: {e}"}
+    return {"models": models, "filtered_out": 0, "error": error}
+
+
+def reconcile_anthropic_library(entries: list[CatalogEntry], models: list[dict]) -> list[dict]:
+    """Mark each model cataloged/catalog_id — an anthropic catalog entry whose
+    effective_upstream_model == slug. Sorted by slug. Mutates in place."""
+    by_slug = {e.effective_upstream_model: e.id
+               for e in entries if _provider_of(e) == "anthropic"}
+    for m in models:
+        m["catalog_id"] = by_slug.get(m["slug"])
+        m["cataloged"] = m["catalog_id"] is not None
+    return sorted(models, key=lambda m: m["slug"])
+
+
 # --- availability probe (static provider entries) --------------------------------------------
 #
 # Every OpenAI-compatible provider serves GET {base_url}/models (ids only, no pricing). The

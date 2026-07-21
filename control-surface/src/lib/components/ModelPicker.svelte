@@ -256,6 +256,9 @@
               {#if m.tools}
                 <svg class="mp-glyph" viewBox="0 0 24 24" aria-label="supports tools"><path d="M14.5 6.5a4 4 0 0 0-5.6 4.9L4 16.3V20h3.7l4.9-4.9a4 4 0 0 0 4.9-5.6l-2.8 2.8-2.1-2.1z" /></svg>
               {/if}
+              {#if m.vision}
+                <svg class="mp-glyph" viewBox="0 0 24 24" aria-label="supports vision"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>
+              {/if}
               <button
                 class="mp-pin"
                 class:on={pinned.includes(m.id)}
@@ -318,6 +321,8 @@
                 </dd>
               </div>
               <div><dt>Tools</dt><dd>{m.tools ? 'yes' : 'no'}</dd></div>
+              <!-- vision is only known when the catalog row declares modalities — '—' = unknown, not 'no' -->
+              <div><dt>Vision</dt><dd>{m.vision ? 'yes' : m.vision === false ? 'no' : '—'}</dd></div>
               <div>
                 <dt>p50 latency</dt>
                 <dd class="n" title="Observed on this gateway's own traffic">

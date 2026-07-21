@@ -19,7 +19,6 @@ personal-org owner adopts for their own traffic. DELETE is scope-pinned (404 for
 from __future__ import annotations
 
 import math
-import os
 import re
 from types import SimpleNamespace
 from urllib.parse import urlparse
@@ -28,7 +27,10 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 
 from ..catalog import LEGACY_MODEL_IDS, CatalogEntry, Price, effective_catalog, id_tier_words
-from ..catalog_sync import fetch_cloudflare_library, fetch_fireworks_library, fetch_openrouter
+from ..catalog_sync import (
+    fetch_anthropic_library, fetch_cloudflare_library, fetch_fireworks_library, fetch_openrouter,
+)
+from ..credentials import stored_or_env
 from .admin_catalog import _model_row
 from .admin_usage import _scope_org
 from .deps import Identity, require_read_role, require_role
@@ -55,6 +57,13 @@ _PROVIDERS = {
         "prefix": "cf",
         "base_url": "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1",
         "api_key_env": "CLOUDFLARE_API_TOKEN", "key_required": True,
+    },
+    "anthropic": {
+        # endpoint=anthropic → the native Messages adapter (FrontierRunner), same as
+        # catalog.anthropic.yaml rows — deliberately NOT the OpenAI-compat wire; no base_url
+        # (the adapter knows the API host).
+        "prefix": "an", "base_url": None, "endpoint": "anthropic",
+        "api_key_env": "ANTHROPIC_API_KEY", "key_required": True,
     },
 }
 
@@ -92,16 +101,18 @@ async def _discovery_row(source: str, slug: str) -> tuple[dict | None, JSONRespo
     """(discovery_row, error) for `slug` in the provider's CURRENT snapshot. Exactly one is non-None.
     The row is the trusted fact source (price/context/caps) — never the client body."""
     cfg = _PROVIDERS[source]
-    key = os.environ.get(cfg["api_key_env"])
+    key = stored_or_env(cfg["api_key_env"])
     if cfg["key_required"] and not key:
         return None, _error(503, f"{cfg['api_key_env']} not configured", "config_error")
     if source == "fireworks":
         fetched = await fetch_fireworks_library(key)
     elif source == "cloudflare":
-        account = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
+        account = stored_or_env("CLOUDFLARE_ACCOUNT_ID")
         if not account:
             return None, _error(503, "CLOUDFLARE_ACCOUNT_ID not configured", "config_error")
         fetched = await fetch_cloudflare_library(key, account)
+    elif source == "anthropic":
+        fetched = await fetch_anthropic_library(key)
     else:
         fetched = await fetch_openrouter(key)
     if fetched["error"]:
@@ -123,7 +134,7 @@ def _materialize(source: str, row: dict, id: str) -> CatalogEntry:
     return CatalogEntry(
         id=id,
         lane="economy",  # a cloud provider-library model, same lane the console's *Yaml writes
-        endpoint="openai",
+        endpoint=cfg.get("endpoint", "openai"),
         base_url=cfg["base_url"],
         api_key_env=cfg["api_key_env"],
         residency_class="cloud",

@@ -243,6 +243,22 @@ export function fwYaml(m, id) {
   ].join('\n');
 }
 
+/** Paste-ready catalog.anthropic.yaml entry — exact field shape of the real fragment: the native
+ *  Messages endpoint (no base_url — the adapter knows the host). Anthropic's models API exposes no
+ *  per-token price or context, so the entry ships zeros with fix-me comments. */
+export function anYaml(m, id) {
+  return [
+    `- id: ${id}`,
+    `  lane: economy`,
+    `  endpoint: anthropic`,
+    `  api_key_env: ANTHROPIC_API_KEY`,
+    `  residency_class: cloud`,
+    `  price_usd_per_1k: { prompt: 0.0, completion: 0.0 } # set the real per-token price (the models API has none)`,
+    `  context_window: ${m.context_window || 0} # set the real context window`,
+    `  upstream_model: ${m.slug}`,
+  ].join('\n');
+}
+
 /** The quiet capability line on a discovery card (chips are gone — Alex ruling): 'Tools ·
  *  Vision · Cloud'. Fireworks swaps Cloud for the factory angle, 'Tunable (LoRA)'; on
  *  OpenRouter, Cloud is the cataloged entry's residency fact and only shows there. */
@@ -281,6 +297,11 @@ export const CF_DISCOVERY_FILTERS = [
   { key: 'tools', label: 'Tools' },
   { key: 'vision', label: 'Vision' },
   { key: 'bigctx', label: '128k+ context' },
+];
+// Anthropic's models API exposes no capability/price/context facts → only the catalog-state chips.
+export const AN_DISCOVERY_FILTERS = [
+  { key: 'cataloged', label: 'In catalog' },
+  { key: 'not_cataloged', label: 'Not cataloged' },
 ];
 const FILTER_PRED = {
   cataloged: (m) => !!m.cataloged,
@@ -327,10 +348,11 @@ export const routedTasks = (catalogId, routing) =>
 // ---- /models page joins ---------------------------------------------------------------------
 
 /** Tag discovery models with their source and concatenate — the Library's "All sources" list. */
-export const mergeDiscovery = (orModels, fwModels, cfModels) => [
+export const mergeDiscovery = (orModels, fwModels, cfModels, anModels) => [
   ...(orModels ?? []).map((m) => ({ ...m, source: 'openrouter' })),
   ...(fwModels ?? []).map((m) => ({ ...m, source: 'fireworks' })),
   ...(cfModels ?? []).map((m) => ({ ...m, source: 'cloudflare' })),
+  ...(anModels ?? []).map((m) => ({ ...m, source: 'anthropic' })),
 ];
 
 /** Union of both sources' filter chips (OpenRouter order first) — the "All sources" chip row.

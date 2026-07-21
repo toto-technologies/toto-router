@@ -35,6 +35,7 @@ def _model_row(e: CatalogEntry) -> dict:
             "residency_class": e.residency_class, "upstream_model": e.effective_upstream_model,
             "price_in": e.price_usd_per_1k.prompt, "price_out": e.price_usd_per_1k.completion,
             "context_window": e.context_window, "tools": e.tools,
+            "vision": ("image" in e.modalities) if e.modalities else None,
             "fine_tuned": is_fine_tuned(e.effective_upstream_model), "source": e.source,
             "price_source": e.price_source}
 
