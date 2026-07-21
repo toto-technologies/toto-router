@@ -10,6 +10,10 @@
   import { fmtTime, relTime, isoAttr } from '$lib/time.js';
   import { revealIn } from '$lib/motion.js';
 
+  // Inlined edition check (not $lib/edition.js) so it folds at build time — vite.config.js `define`.
+  // OSS is single-tenant: no members endpoint, so activity is always the caller's own requests.
+  const OSS = typeof __EDITION__ !== 'undefined' && __EDITION__ === 'oss';
+
   const LIMIT = 50;
   const WINDOWS = [
     { value: '24h', label: '24h', secs: 86400 },
@@ -28,7 +32,8 @@
   // only ever see their own requests server-side, so "Your requests" is correct; an admin/owner who
   // can list members and finds their own row as admin/owner sees the org. No role signal = "Requests".
   const me = query(() => getMe());
-  const members = query(() => listMembers());
+  // listMembers (/v1/admin/members) is enterprise-only; OSS skips it and the scope stays personal.
+  const members = query(() => listMembers(), { immediate: !OSS });
   const myRole = $derived(
     (members.data?.members ?? []).find((m) => m.user_id === me.data?.user_id)?.role
   );
@@ -125,7 +130,7 @@
     { k: 'Classified as', v: (r) => r.classified_as || 'unclassified' },
     { k: 'Model served', v: (r) => prettyModel(r.model) },
     { k: 'Route reason', v: (r) => r.route_reason || '—', mono: true },
-    { k: 'Lane', v: (r) => r.lane || '—' },
+    { k: 'Tier', v: (r) => r.lane || '—' },
     { k: 'Residency', v: (r) => r.residency || '—' },
     { k: 'Guard action', v: (r) => r.guard_action || 'none' },
     { k: 'Status', v: (r) => r.status || '—' },
@@ -162,7 +167,7 @@
       {scopeLabel} · the per-request routing decision trail.
       <span class="muted"
         >Requests log the routing decision and, when content logging is on, the prompt + response —
-        visible only to you and your org admins.</span>
+        visible only to you{OSS ? '' : ' and your org admins'}.</span>
     </div>
   </div>
 </div>

@@ -50,7 +50,6 @@
     getTuningEvals,
   } from '$lib/api/admin.js';
   import ModelCard from '$lib/components/ModelCard.svelte';
-  import LineageCard from '$lib/components/LineageCard.svelte';
   import SkeletonTable from '$lib/components/SkeletonTable.svelte';
   import { revealIn } from '$lib/motion.js';
 
@@ -68,8 +67,11 @@
   // ROUTES stacks join the org routing policy; any failure (incl. org_id_required) → null →
   // footer-right simply stays empty. Never a wall.
   const routingQ = query(() => getOrgRoutingPolicy(orgId || undefined), { isEmpty: () => false });
+  // Fine-tune management (getTuning*) is enterprise-only; the Custom Models section is !OSS-gated
+  // below and immediate:!OSS keeps its eager fetch from 404ing in OSS.
   const tuningQ = query(() => loadTuning(orgId || undefined), {
     isEmpty: (d) => !d.models.length,
+    immediate: !OSS,
   });
   function loadTuning(org) {
     return Promise.all([
@@ -227,9 +229,6 @@
       : []
   );
 
-  // One row's full provenance manifest expands inline (accordion — one open at a time).
-  let openLineage = $state(null);
-  const toggleLineage = (id) => (openLineage = openLineage === id ? null : id);
 </script>
 
 <svelte:head><title>Models · Toto Control</title></svelte:head>
@@ -297,7 +296,8 @@
   {/if}
 {/if}
 
-<!-- ===== Custom Models ===== -->
+<!-- ===== Custom Models (fine-tunes) — enterprise-only ===== -->
+{#if !OSS}
 <div class="mhead"><h2>Custom Models</h2></div>
 
 {#if tuningQ.status === 'loading'}
@@ -373,26 +373,15 @@
                   {:else if r.gpu === 'off'}
                     <span class="chip warnc"><span class="d"></span>GPU off — on-demand</span>
                   {/if}
-                  <button
-                    class="provbtn"
-                    aria-expanded={openLineage === r.model.id}
-                    onclick={() => toggleLineage(r.model.id)}
-                  >{openLineage === r.model.id ? 'Hide provenance' : 'Provenance'}</button>
                 </div>
               </td>
             </tr>
-            {#if openLineage === r.model.id}
-              <tr class="lineagerow">
-                <td colspan="6">
-                  <LineageCard modelId={r.model.id} {orgId} />
-                </td>
-              </tr>
-            {/if}
           {/each}
         </tbody>
       </table>
     </div>
   </div>
+{/if}
 {/if}
 
 <!-- ===== Selecting a Model ===== -->
@@ -718,18 +707,6 @@
   }
   .chip.warnc .d { background: var(--warn); }
   .chip.good .d { background: var(--good); }
-  .provbtn {
-    margin-top: 2px;
-    background: none;
-    border: none;
-    padding: 0;
-    font: inherit;
-    font-size: 0.72rem;
-    color: var(--accent);
-    cursor: pointer;
-  }
-  .provbtn:hover { text-decoration: underline; }
-  .lineagerow td { background: var(--panel-2); padding: 16px 14px; }
 
   /* ---- adopt drawer (page section) ---- */
   .drawer {

@@ -23,7 +23,8 @@
   let searchEl = $state(null);
 
   // Live shell identity — loaded once, browser-only (query() guards), unauthed handled gracefully.
-  const org = query(() => getOrg());
+  // getOrg (/v1/admin/org) is enterprise-only; OSS skips it and the shell name falls back to 'Organization'.
+  const org = query(() => getOrg(), { immediate: !OSS });
   const me = query(() => getMe());
   // Multi-org (W2-C1): the caller's memberships + which one is active. The switcher list renders
   // only when there's more than one; a single-org user sees just their org, no switch affordance.
@@ -136,6 +137,10 @@
   <!-- ========================= TOPBAR ========================= -->
   <header class="top">
     <div class="orgswitch">
+      {#if OSS}
+        <!-- Single-tenant: one org, no create-org endpoint — a static name, no switcher. -->
+        <span class="orgbtn orgstatic"><span class="dot"></span>{orgName}</span>
+      {:else}
       <button
         class="orgbtn"
         aria-haspopup="true"
@@ -167,6 +172,7 @@
         <div class="sep"></div>
         <div class="row add" role="menuitem"><span class="dot" style="border:1px dashed var(--line-2);background:transparent;display:flex;align-items:center;justify-content:center">+</span>New organization</div>
       </div>
+      {/if}
     </div>
 
     <div class="search">
@@ -183,9 +189,11 @@
       <button class="iconbtn" title="Toggle light / dark" aria-label="Toggle theme" onclick={toggleTheme}>
         <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z" /></svg>
       </button>
-      <button class="killbtn" onclick={() => (killOpen = true)}>
-        <svg viewBox="0 0 24 24"><path d="M12 3v9M6.4 6.4a8 8 0 1 0 11.2 0" /></svg>Kill-switch
-      </button>
+      {#if !OSS}
+        <button class="killbtn" onclick={() => (killOpen = true)}>
+          <svg viewBox="0 0 24 24"><path d="M12 3v9M6.4 6.4a8 8 0 1 0 11.2 0" /></svg>Kill-switch
+        </button>
+      {/if}
       <div class="avatar" title={userEmail || userLabel}>{initials(userEmail || userLabel)}</div>
     </div>
   </header>
@@ -204,6 +212,7 @@
 
 <TuneMenu />
 
+{#if !OSS}
 <Modal bind:open={killOpen} danger title="Trigger kill-switch?" subtitle="Halts all model traffic for {orgName} immediately.">
   <div class="notew">
     <svg viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01" /><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6A2 2 0 0 0 22 18L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>
@@ -214,6 +223,7 @@
     <button class="btn danger" onclick={() => (killOpen = false)}>Halt all traffic</button>
   {/snippet}
 </Modal>
+{/if}
 {/if}
 
 <style>
@@ -237,6 +247,10 @@
     to {
       transform: rotate(360deg);
     }
+  }
+  /* Single-tenant org name — the switcher pill without its interactive affordances. */
+  .orgstatic {
+    cursor: default;
   }
   /* Role tag on each org-switcher row (W2-C1). Pushed to the right, muted. */
   .orgmenu .row .orgrole {

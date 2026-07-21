@@ -31,7 +31,9 @@
   // getOrg/renameOrg are both require_role("owner") server-side (toto_gateway/routes/
   // admin_tenancy.py) — a non-owner sees the query's own `forbidden` branch for the
   // whole card, not just the rename action.
-  const org = query(() => getOrg());
+  // The org card (getOrg/renameOrg/zero-retention) is enterprise-only — OSS skips the fetch and
+  // hides the whole section, leaving a single-tenant page of Appearance + personal API keys.
+  const org = query(() => getOrg(), { immediate: !OSS });
 
   let renameOpen = $state(false);
   let nameDraft = $state('');
@@ -217,9 +219,11 @@
   // ---- Organization tokens (W2-C3 admin): service tokens + compliance list + lifetime/grace ----
   // Every query drives its own forbidden/empty branch, so a non-admin caller simply sees the
   // forbidden note rather than a broken card (no client-side role probe needed).
-  const svcTokens = query(() => listServiceTokens());
-  const orgCreds = query(() => listOrgTokens());
-  const tokenPolicy = query(() => getTokenPolicy());
+  // Org-token admin (service tokens, compliance list, policy) is enterprise-only; the render is
+  // already !OSS-gated below, and immediate:!OSS keeps the eager fetch from 404ing in OSS.
+  const svcTokens = query(() => listServiceTokens(), { immediate: !OSS });
+  const orgCreds = query(() => listOrgTokens(), { immediate: !OSS });
+  const tokenPolicy = query(() => getTokenPolicy(), { immediate: !OSS });
 
   // Service-token mint (shown once, admin-gated server-side).
   let svcOpen = $state(false);
@@ -304,8 +308,8 @@
   // governance keys (provider org-ADMIN keys for observability — routes/admin_observability.py).
   // Raw keys go up once over the session cookie and are never returned; the UI only ever holds
   // configured + last4.
-  const provKeys = query(() => getProviderKeys());
-  const govKeys = query(() => getObservabilityKeys());
+  const provKeys = query(() => getProviderKeys(), { immediate: !OSS });
+  const govKeys = query(() => getObservabilityKeys(), { immediate: !OSS });
 
   const GOV_PROVIDERS = [
     { provider: 'anthropic', label: 'Anthropic', hint: 'Organization admin key — spend, usage, and member activity as Anthropic reports it.' },
@@ -385,7 +389,7 @@
 
   // ---- SSO (OIDC, owner-gated) -------------------------------------------------------------
   // toto_gateway/routes/admin_sso.py. Client secret is write-only — never prefilled, never shown.
-  const sso = query(() => getOrgSSO());
+  const sso = query(() => getOrgSSO(), { immediate: !OSS });
   const ssoRedirectUri = browser ? location.origin + '/v1/auth/sso/callback' : '';
 
   let ssoOpen = $state(false);
@@ -454,7 +458,7 @@
   // writes (documents, artifacts). Bucket secret is write-only — never prefilled, never shown.
   // Save is gated on a passing connection test of EXACTLY the fields being saved: `stTestedFp`
   // fingerprints the connector at test time, and any edit invalidates it.
-  const orgStorage = query(() => getOrgStorage());
+  const orgStorage = query(() => getOrgStorage(), { immediate: !OSS });
 
   let stOpen = $state(false);
   let stDraft = $state({ enabled: false, s3_endpoint: '', s3_bucket: '', s3_region: 'us-east-1',
@@ -625,11 +629,12 @@
 <div class="pagehead">
   <div>
     <h1>Settings</h1>
-    <div class="sub">Organization profile, appearance, identity, and danger zone.</div>
+    <div class="sub">{OSS ? 'Appearance and API keys.' : 'Organization profile, appearance, identity, and danger zone.'}</div>
   </div>
 </div>
 
 <!-- ========================= ORGANIZATION ========================= -->
+{#if !OSS}
 {#if org.status === 'loading'}
   <SkeletonCard lines={2} />
 {:else if org.status === 'unauthed'}
@@ -670,6 +675,7 @@
       </div>
     </Card>
   </div>
+{/if}
 {/if}
 
 <!-- ========================= APPEARANCE ========================= -->

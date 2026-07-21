@@ -47,6 +47,11 @@
   import SkeletonTable from '$lib/components/SkeletonTable.svelte';
   import { revealIn } from '$lib/motion.js';
 
+  // Inlined edition check (not $lib/edition.js) so the team-scope branches fold at build time —
+  // vite.config.js `define`. OSS is single-tenant: no teams, so the org-default policy is the
+  // whole surface and the team switcher/access sections drop out.
+  const OSS = typeof __EDITION__ !== 'undefined' && __EDITION__ === 'oss';
+
   const OPTHINT = {
     quality: 'Breaks ties toward the stronger model on the fallback path — bound task types are unaffected.',
     balanced: 'Breaks ties toward the best price-for-quality model on the fallback path.',
@@ -80,7 +85,9 @@
   // Sections B/C are global reads and never need it.
   let orgId = $state(browser ? (new URLSearchParams(location.search).get('org_id') ?? '') : '');
   let orgDraft = $state('');
-  const teamsQ = query(() => listTeams(orgId || undefined));
+  // listTeams (/v1/admin/teams) is enterprise-only; OSS never fetches it and stays pinned to the
+  // org-default scope (teamId = ORG), which renders the routing surface directly.
+  const teamsQ = query(() => listTeams(orgId || undefined), { immediate: !OSS });
   let teamId = $state(ORG);
   // Bindable options = the EDITED scope's effective catalog (base + its adoptions) — exactly
   // the set the routing-policy PUT accepts and dispatch resolves for that scope's callers.
@@ -117,7 +124,7 @@
 
   const teams = $derived(teamsQ.data?.teams ?? []);
   const team = $derived(teams.find((t) => t.team_id === teamId) ?? null);
-  const teamName = $derived(isOrg ? 'Organization (default)' : (team?.name ?? '—'));
+  const teamName = $derived(OSS ? 'this gateway' : isOrg ? 'Organization (default)' : (team?.name ?? '—'));
   const emblem = $derived(isOrg ? '⌂' : (team?.name ?? '··').slice(0, 2).toUpperCase());
   const scopeReady = $derived(isOrg || !!team);
 
@@ -481,12 +488,16 @@
   <div>
     <h1>Catalog &amp; Routing</h1>
     <div class="sub">
-      Which models the team may use, and which model each task type auto-selects. Denials fail closed
+      Which models are available, and which model each task type auto-selects. Denials fail closed
       at dispatch.
     </div>
   </div>
   <div class="right">
-    <span class="scopepill">Policy for <b>{teamName}</b><span class="chev">▾</span></span>
+    {#if OSS}
+      <span class="scopepill">Routing policy</span>
+    {:else}
+      <span class="scopepill">Policy for <b>{teamName}</b><span class="chev">▾</span></span>
+    {/if}
     <button class="btn small primary" disabled={saving || !scopeReady || !ready(routingQ) || !ready(modelsQ)} onclick={save}>
       {saving ? 'Saving…' : `Save policy · v${version}`}
     </button>
@@ -500,16 +511,16 @@
   </div>
 {/if}
 
-{#if teamsQ.status === 'unauthed'}
+{#if !OSS && teamsQ.status === 'unauthed'}
   {@render deadend('Sign in required', 'Your session has expired. Sign in to manage routing.')}
-{:else if teamsQ.status === 'forbidden'}
+{:else if !OSS && teamsQ.status === 'forbidden'}
   {@render deadend('Admin access needed', 'You need an admin or owner role to configure Catalog & Routing.')}
 {:else}
   <!-- Routing (A) and team access (D) need the teams read; the catalog (B) and Fireworks sync (C)
        are global and render regardless — an operator without ?org_id= still gets B/C. -->
-  {#if teamsQ.status === 'loading'}
+  {#if !OSS && teamsQ.status === 'loading'}
     <SkeletonTable rows={6} cols={3} />
-  {:else if needsOrg}
+  {:else if !OSS && needsOrg}
     <div class="stub" style="margin-bottom:24px" in:revealIn>
       <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg></div>
       <b>Pick an organization</b>
@@ -522,31 +533,39 @@
         <button class="btn small primary" type="submit">View</button>
       </form>
     </div>
-  {:else if teamsQ.status === 'error'}
+  {:else if !OSS && teamsQ.status === 'error'}
     {@render deadend('Could not load teams', teamsQ.error?.message ?? 'Unknown error')}
   {:else}
   <!-- ===== SCOPE CONTEXT · org-default routing or one team ===== -->
   <div class="teamband">
     <div class="teamemblem">{emblem}</div>
     <div class="teamlead">
-      <div class="teamswitch">
-        <select class="teambtn teamsel" bind:value={teamId} aria-label="Team">
-          <option value={ORG}>Organization (default)</option>
-          {#each teams as t}<option value={t.team_id}>{t.name}</option>{/each}
-        </select>
-      </div>
+      {#if !OSS}
+        <div class="teamswitch">
+          <select class="teambtn teamsel" bind:value={teamId} aria-label="Team">
+            <option value={ORG}>Organization (default)</option>
+            {#each teams as t}<option value={t.team_id}>{t.name}</option>{/each}
+          </select>
+        </div>
+      {/if}
       <div class="teamframe">
-        <b>Routing — {teamName}</b>
+        <b>{OSS ? 'Routing policy' : `Routing — ${teamName}`}</b>
         <span>
-          {isOrg
-            ? 'Default model choices for owner and API-token traffic without a team.'
-            : `Which model each task type uses for the ${teamName} team.`}
+          {#if OSS}
+            Default model choices for all traffic through this gateway.
+          {:else if isOrg}
+            Default model choices for owner and API-token traffic without a team.
+          {:else}
+            Which model each task type uses for the {teamName} team.
+          {/if}
         </span>
       </div>
     </div>
-    <div class="teamright">
-      <span class="chip"><span class="d" style="background:var(--accent-2)"></span>{teamName}</span>
-    </div>
+    {#if !OSS}
+      <div class="teamright">
+        <span class="chip"><span class="d" style="background:var(--accent-2)"></span>{teamName}</span>
+      </div>
+    {/if}
   </div>
 
   <!-- ===== SECTION A · TASK ROUTING ===== -->
@@ -780,7 +799,7 @@
           <table class="provtable">
             <thead>
               <tr>
-                <th>Model</th><th>Lane</th><th class="r">$ / 1K in·out</th>
+                <th>Model</th><th>Tier</th><th class="r">$ / 1K in·out</th>
                 <th class="r">Context</th><th>Residency</th><th class="dcol"></th>
               </tr>
             </thead>
