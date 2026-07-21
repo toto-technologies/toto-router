@@ -12,7 +12,9 @@
   // "Add task type" posts a custom_labels entry (CT).
   import { browser } from '$app/environment';
   import { query } from '$lib/api/resource.svelte.js';
-  import { prettyModel, providerLabel, priceFmt } from '$lib/models.js';
+  import { prettyModel, providerLabel, newerCheaper } from '$lib/models.js';
+  import { perMtok, fmtMtok } from '$lib/pricing.js';
+  import { loadTrafficRows, trafficStats } from '$lib/traffic.js';
   import { providerHue, providerMark } from '$lib/benchmarks.js';
   import { logoFor } from '$lib/logos.js';
   import {
@@ -43,6 +45,7 @@
   } from '$lib/api/admin.js';
   import AddLocalModel from '$lib/components/AddLocalModel.svelte';
   import { toFailMatrix, failPolicyBody } from '$lib/failpolicy.js';
+  import ModelPicker from '$lib/components/ModelPicker.svelte';
   import SegmentedControl from '$lib/components/SegmentedControl.svelte';
   import Toggle from '$lib/components/Toggle.svelte';
   import Modal from '$lib/components/Modal.svelte';
@@ -162,12 +165,26 @@
   // Split on - and _ only (never on '.', which lives inside version numbers). Falls back to the id.
   const prettyId = (id) => (modelById.has(id) ? prettyModel(modelById.get(id)) : id);
 
-  // Compact money: "$2", "$0.9", "$10" — trims trailing zeros; unknown → "?".
-  const money = (n) => (n == null ? '?' : '$' + parseFloat(n.toFixed(4)));
-  // Tiny "· $2/10" suffix for dropdown options (no suffix when priced-unknown, e.g. local).
-  const priceTag = (m) =>
-    m && (m.price_in != null || m.price_out != null) ? ` · ${money(m.price_in)}/${money(m.price_out)}` : '';
-  const optLabel = (id) => prettyId(id) + priceTag(modelById.get(id));
+  // One price unit everywhere on this page: $ per 1M tokens (perMtok/fmtMtok from $lib/pricing.js,
+  // shared with the Models page) — the API stores per-1k, humans compare per-Mtok.
+  const mtok = (n) => fmtMtok(perMtok(n));
+
+  // Observed traffic (this gateway's own request log) behind the picker's compare mode: per-model
+  // p50 latency + per-task-type token/volume averages. Loaded once; a failed read degrades to
+  // empty maps (pickers then show the cold-start static prices, never a fabricated estimate).
+  let traffic = $state(null);
+  $effect(() => {
+    if (!browser || traffic) return;
+    loadTrafficRows()
+      .then((rows) => (traffic = trafficStats(rows)))
+      .catch(() => (traffic = { perModel: new Map(), perLabel: new Map() }));
+  });
+  const newerSet = $derived(newerCheaper(modelList));
+
+  // Compare-footer hand-off: jump to the model's row in the Model catalog section below.
+  function scrollToCatalog(id) {
+    document.getElementById(`cat-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 
   // Price signal (cheap→premium) from the blended $/1k. Terciles relative to the catalog's own max —
   // ponytail: self-calibrating so it stays sane across providers; swap for absolute $ bands if the
@@ -321,13 +338,9 @@
   const taxNames = $derived(taxLabels.map((r) => (r.name ?? '').trim()).filter(Boolean));
 
   // ---- Classifier picker (W3-C1) -------------------------------------------------------------
-  // The model that reads each prompt to route it. In-perimeter entries sort first (they're the safe
-  // pick for a data-restricted org) and carry a residency flag in the option text.
+  // The model that reads each prompt to route it (rendered by ModelPicker, which shows residency
+  // per row — in-perimeter is the safe pick for a data-restricted org).
   const isPerim = (id) => modelById.get(id)?.residency_class === 'in_perimeter';
-  const classifierOpts = $derived(
-    [...allModelIds].sort((a, b) => (isPerim(b) - isPerim(a)) || prettyId(a).localeCompare(prettyId(b))),
-  );
-  const classifierOptLabel = (id) => `${prettyId(id)}${isPerim(id) ? ' · in-perimeter' : ''}`;
   // Any local_only/deny label means the classifier itself must stay in-perimeter (it reads the prompt
   // before the residency guard). Mirror the backend guard so a bad pick is flagged before Save 422s.
   const taxRequiresLocal = $derived(taxLabels.some((r) => r.constraint === 'local_only' || r.constraint === 'deny'));
@@ -724,7 +737,7 @@
       <div class="tablewrap" in:revealIn>
         <table class="tasktable">
           <thead>
-            <tr><th style="width:34%">Task type</th><th>Auto-selects model</th><th>Default</th><th title="How long a conversation stays pinned to its first routed model">Hold</th></tr>
+            <tr><th style="width:34%">Task type</th><th>Auto-selects model</th><th title="After a conversation's first request is routed, follow-up turns in that conversation reuse the same model for this long before re-routing — keeps answers consistent and provider caches warm. Default uses the gateway-wide hold (15 minutes unless configured).">Hold&thinsp;<span class="holdq" aria-hidden="true">?</span></th></tr>
           </thead>
           <tbody>
             {#each [...routingQ.data.labels.filter((r) => r.label === 'other'), ...routingQ.data.labels.filter((r) => r.label !== 'other')] as row}
@@ -738,53 +751,41 @@
                   {#if row.label === 'other'}
                     <div class="taskdesc">Requests that don't match a task type — or can't be classified — land here.</div>
                   {:else if row.desc}<div class="taskdesc">{row.desc}</div>{/if}
+                  {#if row.custom}
+                    <div class="ctacts">
+                      <button class="btn small ghost" title="Edit this task type’s description or model"
+                        onclick={() => openEdit(row.label)}>Edit</button>
+                      <button
+                        class="btn small ghost danger"
+                        class:armed={removeArm === row.label}
+                        disabled={removing === row.label}
+                        title="Remove this task type"
+                        onblur={() => removeArm === row.label && (removeArm = null)}
+                        onclick={() => removeCustom(row.label)}
+                      >
+                        {removing === row.label ? 'Removing…' : removeArm === row.label ? 'Really remove?' : 'Remove'}
+                      </button>
+                    </div>
+                  {/if}
                 </td>
                 {#if row.bindable}
                   <td>
                     <div class="flowcell">
                       <span class="flowarrow" aria-hidden="true"></span>
-                      <select
-                        class="routesel"
-                        class:unavail={!allowed.has(routeSel[row.label] ?? row.model)}
-                        aria-label="Model for {row.label}"
+                      <ModelPicker
+                        models={modelList}
                         value={routeSel[row.label] ?? row.model}
-                        onchange={(e) => pickModel(row.label, e.currentTarget.value)}
-                      >
-                        {#each allModelIds as id}
-                          <option value={id} disabled={!allowed.has(id)}>
-                            {optLabel(id)}{allowed.has(id) ? '' : ' · unavailable'}
-                          </option>
-                        {/each}
-                      </select>
-                    </div>
-                  </td>
-                  <td>
-                    <div class="dfltcell">
-                      {#if row.custom}
-                        <div class="ctacts">
-                          <button class="btn small ghost" title="Edit this task type’s description or model"
-                            onclick={() => openEdit(row.label)}>Edit</button>
-                          <button
-                            class="btn small ghost danger"
-                            class:armed={removeArm === row.label}
-                            disabled={removing === row.label}
-                            title="Remove this task type"
-                            onblur={() => removeArm === row.label && (removeArm = null)}
-                            onclick={() => removeCustom(row.label)}
-                          >
-                            {removing === row.label ? 'Removing…' : removeArm === row.label ? 'Really remove?' : 'Remove'}
-                          </button>
-                        </div>
-                      {:else}
-                        <span class="dm">
-                          default {prettyId(row.default_model)}{allowed.has(row.default_model) ? '' : ' · denied here'}
-                        </span>
-                        {#if isOver(row)}
-                          <span class="chip ovr" title="Auto-selects a model you chose, not the default">overridden</span>
-                        {/if}
-                        {#if isOver(row) && allowed.has(row.default_model)}
-                          <button class="resetdf" title="Reset to default" onclick={() => resetRow(row)}>↺</button>
-                        {/if}
+                        {allowed}
+                        defaultId={row.custom ? null : row.default_model}
+                        taskLabel={row.label}
+                        {traffic}
+                        newer={newerSet}
+                        onviewcatalog={scrollToCatalog}
+                        ariaLabel="Model for {row.label}"
+                        onchange={(id) => pickModel(row.label, id)}
+                      />
+                      {#if !row.custom && isOver(row) && allowed.has(row.default_model)}
+                        <button class="resetdf" title="Reset to default ({prettyId(row.default_model)})" onclick={() => resetRow(row)}>↺</button>
                       {/if}
                     </div>
                   </td>
@@ -801,7 +802,7 @@
                     </select>
                   </td>
                 {:else}
-                  <td colspan="3">
+                  <td colspan="2">
                     <span class="lockpill">
                       <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
                       routed by {row.label === 'redact' ? 'privacy guard' : 'fallback path'}
@@ -853,19 +854,16 @@
         <!-- Pluggable classifier: which model reads each prompt to route it. -->
         <div class="optbar">
           <span class="lab">Which model reads your prompts to route them</span>
-          <select class="clsel" bind:value={classifierModel}>
-            <option value="">Default (platform classifier)</option>
-            {#each classifierOpts as id}
-              <option value={id}>{classifierOptLabel(id)}</option>
-            {/each}
-          </select>
-          {#if classifierModel}
-            {#if isPerim(classifierModel)}
-              <span class="chip perim"><span class="d"></span>in-perimeter</span>
-            {:else}
-              <span class="chip cloud"><span class="d"></span>cloud</span>
-            {/if}
-          {/if}
+          <ModelPicker
+            models={modelList}
+            value={classifierModel}
+            {traffic}
+            newer={newerSet}
+            noneLabel="Default (platform classifier)"
+            onviewcatalog={scrollToCatalog}
+            ariaLabel="Classifier model"
+            onchange={(id) => (classifierModel = id)}
+          />
           <span class="exp">
             {#if classifierLeaks}
               <strong class="warn">This model runs in the cloud. Your data-classification rules require
@@ -956,13 +954,13 @@
           <table class="provtable">
             <thead>
               <tr>
-                <th>Model</th><th class="r">$ / 1K in·out</th>
+                <th>Model</th><th class="r">$ / 1M in·out</th>
                 <th class="r">Context</th><th>Residency</th><th class="dcol"></th>
               </tr>
             </thead>
             <tbody>
               {#each g.models as m (m.id)}
-                <tr>
+                <tr id="cat-{m.id}">
                   <td>
                     <div class="mname">
                       {displayName(m)}
@@ -974,7 +972,7 @@
                       {#each m.aliases ?? [] as a}<span class="idchip n alias" title="alias">{a}</span>{/each}
                     </div>
                   </td>
-                  <td class="r n">{priceFmt(m.price_in)}·{priceFmt(m.price_out)}</td>
+                  <td class="r n">{mtok(m.price_in)} · {mtok(m.price_out)}</td>
                   <td class="r n">{ctxShort(m.context_window)}</td>
                   <td>
                     {#if m.residency_class === 'in_perimeter'}
@@ -1206,7 +1204,7 @@
                   title="Sort by price"
                   onclick={cyclePriceSort}
                   onkeydown={(e) => (e.key === ' ' || e.key === 'Enter') && (e.preventDefault(), cyclePriceSort())}
-                >$ / 1K in·out <span class="sortcaret">{priceSort === 'asc' ? '▲' : priceSort === 'desc' ? '▼' : '↕'}</span></th>
+                >$ / 1M in·out <span class="sortcaret">{priceSort === 'asc' ? '▲' : priceSort === 'desc' ? '▼' : '↕'}</span></th>
                 <th class="r">Context</th><th>Residency</th>
                 <th style="text-align:center">Access</th><th style="text-align:center">Default</th>
               </tr>
@@ -1221,7 +1219,7 @@
                   </td>
                   <td><span class="provbadge">{providerLabel(m.provider ?? m.via)}</span></td>
                   <td class="r n" class:muted={!m.price_in && !m.price_out}>
-                    {#if priceTier(m)}<span class="pricedot" data-tier={priceTier(m)} title="{priceTier(m)} price"></span>{/if}{priceFmt(m.price_in)}·{priceFmt(m.price_out)}
+                    {#if priceTier(m)}<span class="pricedot" data-tier={priceTier(m)} title="{priceTier(m)} price"></span>{/if}{mtok(m.price_in)} · {mtok(m.price_out)}
                   </td>
                   <td class="r n">{ctxFmt(m.context_window)}</td>
                   <td>
@@ -1279,11 +1277,16 @@
   </div>
   <div class="field">
     <label for="ct-model">Bound model</label>
-    <select id="ct-model" class="routesel" style="width:100%;height:36px" bind:value={ctModel}>
-      {#each allModelIds as id}
-        <option value={id} disabled={!allowed.has(id)}>{optLabel(id)}{allowed.has(id) ? '' : ' · denied'}</option>
-      {/each}
-    </select>
+    <ModelPicker
+      models={modelList}
+      value={ctModel}
+      {allowed}
+      taskLabel={ctEditing ?? (ctName.trim() || null)}
+      {traffic}
+      newer={newerSet}
+      ariaLabel="Bound model"
+      onchange={(id) => (ctModel = id)}
+    />
     {#if ctErr?.field === 'model'}<div class="fielderr">{ctErr.message}</div>{/if}
   </div>
   {#if ctErr && !ctErr.field}<div class="fielderr">{ctErr.message}</div>{/if}
@@ -1382,13 +1385,19 @@
     font-size: 0.8125rem;
   }
   .taxsel { flex: 0 0 auto; }
-  .clsel {
-    padding: 6px 8px;
-    border: 1px solid var(--line);
-    border-radius: 7px;
-    background: var(--surface, transparent);
-    color: inherit;
-    font-size: 0.8125rem;
+  /* Hold header affordance: signals the tooltip carrying the honest stickiness explanation. */
+  .holdq {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    border: 1px solid var(--line-2);
+    font-size: 0.5625rem;
+    color: var(--text-3);
+    cursor: help;
+    vertical-align: 1px;
   }
   .exp .warn { color: var(--danger, #c0392b); font-weight: 600; }
   .taxdefault { margin-top: 10px; display: flex; align-items: center; gap: 10px; }

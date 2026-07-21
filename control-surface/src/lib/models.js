@@ -37,6 +37,26 @@ export function providerLabel(p) {
   return map[p] || (p.charAt(0).toUpperCase() + p.slice(1));
 }
 
+// "newer · cheaper": a model whose pretty name is the same family as a same-provider sibling
+// with a LOWER trailing version and a strictly HIGHER blended price (e.g. Sonnet 5 undercutting
+// Sonnet 4.6). Purely data-derived — no model names are hardcoded. Returns the Set of ids that
+// deserve the tag.
+export function newerCheaper(models) {
+  const parsed = [];
+  for (const m of models ?? []) {
+    if (m.price_in == null && m.price_out == null) continue;
+    const match = prettyModel(m).match(/^(.+?)\s+(\d+(?:\.\d+)?)$/);
+    if (!match) continue;
+    parsed.push({ id: m.id, prov: m.provider ?? m.via, fam: match[1], ver: parseFloat(match[2]),
+                  price: (m.price_in ?? 0) + (m.price_out ?? 0) });
+  }
+  const out = new Set();
+  for (const a of parsed)
+    for (const b of parsed)
+      if (a.prov === b.prov && a.fam === b.fam && a.ver > b.ver && a.price < b.price) out.add(a.id);
+  return out;
+}
+
 // Adaptive $/1k price formatter — 2 decimals for >=$1 (3.00, 15.00); sub-dollar keeps enough
 // significant figures so a real sub-cent rate isn't rounded away to "0.00" (0.0003, 0.0025).
 // Shared by the Catalog + Benchmarks price columns so they can't drift.
