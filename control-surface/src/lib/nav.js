@@ -8,7 +8,7 @@
 const OSS = typeof __EDITION__ !== 'undefined' && __EDITION__ === 'oss';
 const OVERVIEW = { href: '/overview', label: 'Overview', icon: '<path d="M4 13h6V4H4zM14 20h6V4h-6zM4 20h6v-4H4z"/>' };
 const ACTIVITY = { href: '/activity', label: 'Activity', icon: '<path d="M3 12h4l2 6 4-14 2 8h6"/>' };
-const MODELS = { href: '/models', label: 'Models', icon: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>' };
+const MODELS = { href: '/models', label: 'Model Library', icon: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>' };
 const CATALOG = { href: '/catalog', label: 'Catalog & Routing', icon: '<path d="M4 6h16M4 12h16M4 18h10"/><circle cx="18" cy="18" r="2.4"/>' };
 const CACHING = { href: '/caching', label: 'Caching', icon: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>' };
 const USAGE = { href: '/usage', label: 'Usage & Billing', icon: '<path d="M4 19V5M4 19h16M8 16l3-4 3 2 4-6"/>' };

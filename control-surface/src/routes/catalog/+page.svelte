@@ -921,7 +921,8 @@
   <div class="secthead">
     <h2>Model catalog</h2>
     <span class="hint">
-      Every model this gateway can serve, grouped by provider. Expand a row for the wiring details.
+      Every model this gateway can serve, grouped by provider. Expand a row for the wiring
+      details — adopt more in the <a href="/models">Model Library</a>.
     </span>
     <button class="btn small" onclick={() => (lmOpen = true)}>+ Add local model</button>
   </div>
