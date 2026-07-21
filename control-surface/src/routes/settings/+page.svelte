@@ -1469,7 +1469,7 @@
   /* SSO summary */
   .ssometa { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 9px; }
   .ssorow { display: flex; align-items: baseline; gap: 12px; font-size: 0.8125rem; }
-  .ssorow .k { flex: 0 0 108px; color: var(--text-3); font-size: 0.71875rem; }
+  .ssorow .k { flex: 0 0 108px; color: var(--text-3); font-size: 0.75rem; }
   .ssorow code { color: var(--text-2); overflow-x: auto; white-space: nowrap; }
   .dchips { display: flex; flex-wrap: wrap; gap: 6px; }
   .ssotoggle { display: flex; align-items: flex-start; gap: 9px; margin-top: 4px; font-size: 0.8125rem; color: var(--text-2); cursor: pointer; }
@@ -1487,17 +1487,17 @@
   /* Provider keys */
   .pkgroup { margin-top: 14px; }
   .pkgroup + .pkgroup { border-top: 1px solid var(--line); padding-top: 14px; }
-  .pkghead { font-size: 0.65625rem; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); font-weight: calc(600 + (var(--ui-weight) - 400)); }
+  .pkghead { font-size: 0.6875rem; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); font-weight: calc(600 + (var(--ui-weight) - 400)); }
   .pkrow { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 10px 0; }
   .pkrow + .pkrow { border-top: 1px solid var(--line); }
   .pkrow b { font-size: 0.875rem; font-weight: calc(600 + (var(--ui-weight) - 400)); }
   .pkactions { display: flex; align-items: center; gap: 8px; }
-  .pkhint { font-size: 0.71875rem; color: var(--text-2); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; }
+  .pkhint { font-size: 0.75rem; color: var(--text-2); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; }
 
   /* API keys */
   .headbtn { margin-left: auto; }
   .baseurl { display: flex; align-items: center; gap: 10px; margin: 4px 0 14px; flex-wrap: wrap; }
-  .baseurl .bl { font-size: 0.65625rem; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); font-weight: calc(600 + (var(--ui-weight) - 400)); }
+  .baseurl .bl { font-size: 0.6875rem; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); font-weight: calc(600 + (var(--ui-weight) - 400)); }
   .baseurl code { font-size: 0.78125rem; color: var(--text-2); background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 5px 9px; }
   .skrows { display: flex; flex-direction: column; gap: 9px; padding: 4px 0; }
   .emptyk { color: var(--text-3); font-size: 0.8125rem; padding: 10px 0 4px; }

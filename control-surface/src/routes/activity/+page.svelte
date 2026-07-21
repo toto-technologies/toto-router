@@ -7,6 +7,7 @@
   import { query } from '$lib/api/resource.svelte.js';
   import { getRequests, getRequestDetail, listModels, listMembers, getMe } from '$lib/api/admin.js';
   import { prettyModel, priceFmt } from '$lib/models.js';
+  import { taskLabel } from '$lib/tasks.js';
   import { fmtTime, relTime, isoAttr } from '$lib/time.js';
   import { revealIn } from '$lib/motion.js';
 
@@ -98,6 +99,8 @@
 
   // One-sentence "why this model", derived from route_reason (colon-segmented, e.g.
   // label:code_generation:team, smart:classify_failed). Falls back to a literal echo.
+  // Scope tokens (:team) are internal vocabulary — this single-tenant console says
+  // "your routing policy"; the raw reason stays visible in the detail rows below.
   function explainReason(reason, served) {
     const m = prettyModel(served);
     if (!reason) return `Served by ${m}.`;
@@ -105,15 +108,15 @@
     const kind = parts[0];
     const scope = parts[parts.length - 1];
     if (kind === 'label') {
-      const task = parts[1] ?? 'this task';
+      const task = taskLabel(parts[1]) || 'this task';
+      if (scope === 'warm-hold')
+        return `Classified as “${task}”, but the session was held on ${m} — its prompt cache is still warm, so switching would cost more than it saves.`;
       const via =
-        scope === 'team'
-          ? "your team's routing policy"
-          : scope === 'global'
-            ? 'the global default policy'
-            : scope === 'fallback'
-              ? 'a fallback (no policy matched)'
-              : 'a routing policy';
+        scope === 'global'
+          ? 'the global default policy'
+          : scope === 'fallback'
+            ? 'a fallback (no policy matched)'
+            : 'your routing policy';
       return `Classified as “${task}” and routed to ${m} by ${via}.`;
     }
     if (kind === 'smart') {
@@ -125,9 +128,28 @@
     return `Served by ${m} (${reason}).`;
   }
 
+  // Sub-line under the task chip — ONLY when the reason says more than the chip already does.
+  // A routine policy match (label:<task>[:scope]) is silent; holds, fallbacks, cache hits, and
+  // failures get plain language. Anything unrecognized echoes raw so nothing is hidden.
+  function reasonExtra(reason) {
+    if (!reason) return '';
+    if (reason === 'cache') return 'served from cache';
+    if (reason === 'catalog') return 'model requested directly';
+    const parts = reason.split(':');
+    if (parts[0] === 'label') {
+      const scope = parts[2];
+      if (scope === 'warm-hold') return 'held on session — prompt cache still warm';
+      if (scope === 'fallback') return 'fallback — no policy matched';
+      return '';
+    }
+    if (reason === 'smart:classify_failed') return 'classification failed — default model';
+    if (reason === 'smart:policy_error') return 'policy error — default model';
+    return reason;
+  }
+
   // Ordered field list for the drill-down. `v` reads the value off the selected row at render time.
   const detailRows = [
-    { k: 'Classified as', v: (r) => r.classified_as || 'unclassified' },
+    { k: 'Classified as', v: (r) => taskLabel(r.classified_as) || 'Unclassified' },
     { k: 'Model served', v: (r) => prettyModel(r.model) },
     { k: 'Route reason', v: (r) => r.route_reason || '—', mono: true },
     { k: 'Residency', v: (r) => r.residency || '—' },
@@ -208,7 +230,7 @@
 </div>
 
 {#if reqs.status === 'loading'}
-  <SkeletonTable rows={8} cols={7} />
+  <SkeletonTable rows={8} cols={6} />
 {:else if reqs.status === 'unauthed'}
   <div class="stub"><b>Sign in required</b><p>Your session has expired. Sign in again to view activity.</p></div>
 {:else if reqs.status === 'forbidden'}
@@ -220,17 +242,19 @@
     <div class="card">
       <div class="ch">
         <h3>Requests</h3>
-        <span class="meta">{reqs.status === 'empty' ? 'none' : `${offset + 1}–${offset + rows.length}`}</span>
+        <span class="meta">{rows.length === 0 ? 'none' : `${offset + 1}–${offset + rows.length}`}</span>
       </div>
-      {#if reqs.status === 'empty'}
+      {#if reqs.status === 'empty' || rows.length === 0}
         <div class="cb" style="text-align:center;color:var(--text-3);padding:36px 15px">
-          No requests yet — send one via the API or pi, then it appears here.
+          {model || label
+            ? 'No requests match these filters.'
+            : 'No requests yet — send one via the API or pi, then it appears here.'}
         </div>
       {:else}
         <Table>
           {#snippet head()}
             <tr>
-              <th>Time</th><th>Task</th><th>Model</th><th>Route reason</th>
+              <th>Time</th><th>Task</th><th>Model</th>
               <th class="r">Tokens</th><th class="r">Cost</th><th class="r">Latency</th>
             </tr>
           {/snippet}
@@ -244,14 +268,17 @@
               </td>
               <td>
                 {#if r.classified_as}
-                  <Chip>{r.classified_as}</Chip>
+                  <Chip>{taskLabel(r.classified_as)}</Chip>
                 {:else}
-                  <span class="muted">unclassified</span>
+                  <span class="muted">Unclassified</span>
+                {/if}
+                {#if reasonExtra(r.route_reason)}
+                  <span class="rx">{reasonExtra(r.route_reason)}</span>
                 {/if}
               </td>
-              <td>{prettyModel(r.model)}</td>
-              <td class="mono muted">{r.route_reason || '—'}</td>
-              <td class="r n">{r.tokens_prompt ?? 0}·{r.tokens_completion ?? 0}</td>
+              <td class="rowlead">{prettyModel(r.model)}</td>
+              <td class="r n" title="{r.tokens_prompt ?? 0} in · {r.tokens_completion ?? 0} out"
+                >{r.tokens_prompt ?? 0}·{r.tokens_completion ?? 0}</td>
               <td class="r n">{usd(r.cost_usd)}{#if r.cost_estimated}<span class="est">~</span>{/if}</td>
               <td class="r n">{r.latency_ms == null ? '—' : `${r.latency_ms} ms`}</td>
             </tr>
@@ -259,10 +286,12 @@
         </Table>
       {/if}
     </div>
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
-      <button class="btn small" disabled={offset === 0} onclick={prevPage}>Prev</button>
-      <button class="btn small" disabled={!hasNext} onclick={nextPage}>Next</button>
-    </div>
+    {#if offset > 0 || hasNext}
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+        <button class="btn small" disabled={offset === 0} onclick={prevPage}>Prev</button>
+        <button class="btn small" disabled={!hasNext} onclick={nextPage}>Next</button>
+      </div>
+    {/if}
   </div>
 {/if}
 
@@ -314,7 +343,7 @@
   /* mirror .field label (app.css) for the SegmentedControl's caption */
   .lbl {
     display: block;
-    font-size: 0.65625rem;
+    font-size: 0.6875rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--text-3);
@@ -323,6 +352,13 @@
   }
   .clickrow {
     cursor: pointer;
+  }
+  /* reason sub-line under the task chip — only rendered when it adds info beyond the label */
+  .rx {
+    display: block;
+    margin-top: 3px;
+    font-size: 0.75rem;
+    color: var(--text-3);
   }
   .clickrow:hover {
     background: var(--panel-2);
