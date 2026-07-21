@@ -387,6 +387,27 @@ class FrontierRunner:
         self._client = client  # injected in tests; lazy-constructed in production
 
     def _get_client(self) -> Any:
+        from ..credentials import (
+            PROVIDERS, ProviderCredentialUnavailable, byok_keys, byok_unavailable_envs,
+        )
+
+        # Same credential seam as the OpenAI runner: a stored key (byok overlay) wins over the
+        # env var and gets an EPHEMERAL client (never cached — must not leak across requests);
+        # a configured-but-unreadable key fails closed before the wire; otherwise the cached
+        # client resolves ANTHROPIC_API_KEY from the environment (SDK default).
+        key_env = self.entry.api_key_env
+        if key_env in byok_unavailable_envs.get():
+            provider = next((
+                name for name, definition in PROVIDERS.items()
+                if definition.api_key_env == key_env
+            ), key_env)
+            raise ProviderCredentialUnavailable((provider,), "configured_key_unavailable")
+        override = byok_keys.get().get(key_env)
+        if override:
+            from anthropic import AsyncAnthropic
+
+            return AsyncAnthropic(api_key=override,
+                                  timeout=get_settings().provider_timeout(), max_retries=0)
         if self._client is None:
             from anthropic import AsyncAnthropic  # lazy import — no key needed at import time
 

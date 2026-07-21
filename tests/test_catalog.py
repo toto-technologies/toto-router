@@ -309,6 +309,8 @@ def test_catalog_ids_tell_the_truth_about_their_upstream():
             "glm-4.7": "glm-4.7",
             "gpt-5.6-sol": "gpt-5.6-sol",
             "gpt-5.6-luna": "gpt-5.6-luna",
+        },
+        "catalog.anthropic.yaml": {
             "claude-sonnet-5": "claude-sonnet-5",
             "claude-opus-4.8": "claude-opus-4-8",
             "claude-haiku-4.5": "claude-haiku-4-5",
@@ -352,7 +354,7 @@ def test_catalog_ids_never_use_tier_words():
     convention cannot come back. Real model names that happen to be words (haiku, flash-as-in-
     gemini-flash) are fine because the guard checks OUR tier vocabulary, not model vocabulary."""
     cat = Catalog.load("catalog.yaml,catalog.openrouter.yaml,catalog.fireworks.yaml,"
-                       "catalog.directlabs.yaml,catalog.cloudflare.yaml")
+                       "catalog.directlabs.yaml,catalog.cloudflare.yaml,catalog.anthropic.yaml")
     for entry in cat.models:
         segments = set(entry.id.replace(".", "-").split("-"))
         bad = segments & BANNED_TIER_WORDS
@@ -366,7 +368,7 @@ def test_shared_ids_price_identically_across_fragments():
     pre-fix 1000x scale and overrode catalog.yaml's corrected row. Any legitimately diverging
     price belongs on ONE fragment's row (or a price override), never on a duplicated id."""
     fragments = ["catalog.yaml", "catalog.openrouter.yaml", "catalog.fireworks.yaml",
-                 "catalog.directlabs.yaml", "catalog.cloudflare.yaml"]
+                 "catalog.directlabs.yaml", "catalog.cloudflare.yaml", "catalog.anthropic.yaml"]
     seen: dict[str, tuple[str, tuple]] = {}
     for path in fragments:
         for m in Catalog.load(path).models:

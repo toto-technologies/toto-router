@@ -305,45 +305,6 @@ models:
     context_window: 1050000
     upstream_model: gpt-5.6-luna
 
-  # --- Anthropic direct, beyond catalog.yaml's claude-sonnet-4.6. Needs ANTHROPIC_API_KEY. ---
-  # endpoint=anthropic → the FrontierRunner (native Messages API), NOT the OpenAI-compat wire —
-  # same shape as catalog.yaml's claude-sonnet-4.6 row. Prices/ids/context:
-  # platform.claude.com/docs pricing + models overview (2026-07-14). Cache: 5-min write = 1.25x
-  # input, read = 0.1x (the Price defaults) — write premium set explicitly per house rule.
-  # NOTE: prices here are per-1k like the rest of this fragment; catalog.yaml's claude-sonnet-4.6
-  # row stores per-1M figures in the same field (marked "example pricing" there) — don't copy it.
-
-  # Sonnet 5 direct: $2/$10 per 1M, 1M ctx — the native-endpoint sibling of or-sonnet-5.
-  # Exists so the driver/companion defaults can run first-party instead of through OpenRouter
-  # (ToS §7(4) exposure — see provider-tos memory/lawyer list, 2026-07-14). Same price as the
-  # OR route; first-party cache mechanics.
-  - id: claude-sonnet-5
-    lane: frontier
-    endpoint: anthropic
-    residency_class: cloud
-    price_usd_per_1k: { prompt: 0.002, completion: 0.010, cache_write_multiplier: 1.25 }
-    context_window: 1000000
-    upstream_model: claude-sonnet-5
-
-  # Current Opus: $5/$25 per 1M, 1M ctx, 128k out.
-  - id: claude-opus-4.8
-    lane: frontier
-    endpoint: anthropic
-    residency_class: cloud
-    price_usd_per_1k: { prompt: 0.005, completion: 0.025, cache_write_multiplier: 1.25 }
-    context_window: 1000000
-    upstream_model: claude-opus-4-8
-
-  # Fastest current Claude: $1/$5 per 1M, 200k ctx, 64k out. Direct sibling of or-haiku-4.5
-  # (same price via OpenRouter, but this is the native endpoint + first-party cache mechanics).
-  - id: claude-haiku-4.5
-    lane: economy
-    endpoint: anthropic
-    residency_class: cloud
-    price_usd_per_1k: { prompt: 0.001, completion: 0.005, cache_write_multiplier: 1.25 }
-    context_window: 200000
-    upstream_model: claude-haiku-4-5
-
   # --- Cohere: DELIBERATELY OMITTED (2026-07-14). Their Compatibility API
   # (api.cohere.ai/compatibility/v1) IS genuinely OpenAI-compatible — chat completions,
   # streaming, tool calling, structured outputs all documented — but cohere.com/pricing
