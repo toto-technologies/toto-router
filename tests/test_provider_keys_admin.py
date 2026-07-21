@@ -37,7 +37,8 @@ def test_route_roundtrip_masking_and_source(monkeypatch):
     monkeypatch.setenv("FIREWORKS_API_KEY", "sk-fw-from-environment")
     with TestClient(create_app(settings=_settings())) as client:
         rows = {p["provider"]: p for p in client.get("/v1/admin/provider-keys").json()["providers"]}
-        assert set(rows) == {"openrouter", "fireworks", "cloudflare", "openai", "gemini"}
+        assert set(rows) == {"openrouter", "fireworks", "cloudflare", "openai", "gemini",
+                             "anthropic"}
         assert rows["openrouter"] == {
             "provider": "openrouter", "label": "OpenRouter", "powers": rows["openrouter"]["powers"],
             "configured": False, "masked": None, "source": None,

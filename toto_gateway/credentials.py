@@ -47,6 +47,7 @@ PROVIDERS: dict[str, Provider] = {
                            account_env="CLOUDFLARE_ACCOUNT_ID"),
     "openai": Provider("OpenAI", "OPENAI_API_KEY", "GPT models via the direct OpenAI API"),
     "gemini": Provider("Gemini", "GEMINI_API_KEY", "Google Gemini via the direct API"),
+    "anthropic": Provider("Anthropic", "ANTHROPIC_API_KEY", "Claude models via the direct API"),
 }
 
 # Per-request BYOK override: {api_key_env: decrypted_key}. Default empty → the platform-key path

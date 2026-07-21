@@ -41,6 +41,7 @@ models:
   - id: claude-sonnet-4.6
     lane: frontier
     endpoint: anthropic
+    api_key_env: ANTHROPIC_API_KEY
     residency_class: cloud
     # $3/$15 per 1M (platform.claude.com pricing) ÷ 1000 — this field is per 1k tokens.
     # Scale fixed 2026-07-14: was stored as per-1M figures, overreporting cost 1000×.

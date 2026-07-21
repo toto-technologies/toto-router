@@ -30,6 +30,13 @@ def default_factory(entry: CatalogEntry) -> Runner:
         from .openai import OpenAIRunner
 
         return OpenAIRunner(entry)
+    # Native Anthropic Messages API — any lane. endpoint names the wire protocol, lane the cost
+    # tier, so an economy-lane Claude entry (haiku) must still dispatch natively rather than
+    # falling through to the bare-URL MLX runner.
+    if entry.endpoint == "anthropic":
+        from .frontier import FrontierRunner
+
+        return FrontierRunner(entry)
     if entry.lane == "economy":
         from .mlx import MLXRunner  # OpenAI-compatible upstream at a bare URL (mlx_lm.server, …)
 
