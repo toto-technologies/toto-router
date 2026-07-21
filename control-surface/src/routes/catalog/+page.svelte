@@ -40,8 +40,8 @@
     getCatalogModels,
     getFireworksSync,
     deleteAdoption,
-    createLocalModel,
   } from '$lib/api/admin.js';
+  import AddLocalModel from '$lib/components/AddLocalModel.svelte';
   import { toFailMatrix, failPolicyBody } from '$lib/failpolicy.js';
   import SegmentedControl from '$lib/components/SegmentedControl.svelte';
   import Toggle from '$lib/components/Toggle.svelte';
@@ -576,38 +576,9 @@
     if (browser) localStorage.setItem('toto.catalog.advanced', degradedOpen ? '1' : '0');
   }
 
-  // ---- Add local model (an OpenAI-compatible server on the user's machine/LAN) ---------------
-  const LOCAL_PRESETS = [
-    ['Ollama', 'http://localhost:11434/v1'],
-    ['LM Studio', 'http://localhost:1234/v1'],
-    ['vLLM', 'http://localhost:8000/v1'],
-  ];
+  // ---- Add local model — self-contained flow (AddLocalModel.svelte), mounted here today and
+  // in Settings later; this page only opens it and reloads its catalog views on success.
   let lmOpen = $state(false);
-  let lmName = $state('');
-  let lmUrl = $state('');
-  let lmModel = $state('');
-  let lmErr = $state(null);
-  let lmSaving = $state(false);
-  function openLocal() {
-    lmName = '';
-    lmUrl = '';
-    lmModel = '';
-    lmErr = null;
-    lmOpen = true;
-  }
-  async function submitLocal() {
-    lmSaving = true;
-    lmErr = null;
-    try {
-      await createLocalModel({ name: lmName.trim(), baseUrl: lmUrl.trim(), model: lmModel.trim() });
-      await Promise.all([catQ.reload(), modelsQ.reload()]);
-      lmOpen = false;
-    } catch (e) {
-      lmErr = e?.message ?? 'Could not add the local model';
-    } finally {
-      lmSaving = false;
-    }
-  }
 
   async function confirmRemoveAdopted() {
     removingAdopted = true;
@@ -952,7 +923,7 @@
     <span class="hint">
       Every model this gateway can serve, grouped by provider. Expand a row for the wiring details.
     </span>
-    <button class="btn small" onclick={openLocal}>+ Add local model</button>
+    <button class="btn small" onclick={() => (lmOpen = true)}>+ Add local model</button>
   </div>
 
   {#if catQ.status === 'loading'}
@@ -1323,38 +1294,7 @@
   {/snippet}
 </Modal>
 
-<!-- ===== Add local model ===== -->
-<Modal
-  bind:open={lmOpen}
-  title="Add local model"
-  subtitle="Point Toto at an OpenAI-compatible server running on your machine or network. No API key needed."
->
-  <div class="field">
-    <label for="lm-url">Server URL</label>
-    <input id="lm-url" bind:value={lmUrl} placeholder="http://localhost:11434/v1" spellcheck="false" />
-    <div class="presets">
-      {#each LOCAL_PRESETS as [label, url] (url)}
-        <button class="btn small ghost" class:active={lmUrl === url} onclick={() => (lmUrl = url)}>{label}</button>
-      {/each}
-    </div>
-  </div>
-  <div class="field">
-    <label for="lm-model">Model name</label>
-    <input id="lm-model" bind:value={lmModel} placeholder="llama3.1" spellcheck="false" />
-    <div class="fieldnote">The model name exactly as your server knows it (e.g. `ollama list`).</div>
-  </div>
-  <div class="field">
-    <label for="lm-name">Display name (optional)</label>
-    <input id="lm-name" bind:value={lmName} placeholder="Llama on Ollama" />
-  </div>
-  {#if lmErr}<div class="fielderr">{lmErr}</div>{/if}
-  {#snippet footer()}
-    <button class="btn ghost" onclick={() => (lmOpen = false)}>Cancel</button>
-    <button class="btn primary" disabled={lmSaving || !lmUrl.trim() || !lmModel.trim()} onclick={submitLocal}>
-      {lmSaving ? 'Adding…' : 'Add local model'}
-    </button>
-  {/snippet}
-</Modal>
+<AddLocalModel bind:open={lmOpen} onadded={() => Promise.all([catQ.reload(), modelsQ.reload()])} />
 
 <!-- ===== Remove adopted model (Section B) ===== -->
 <Modal
@@ -1504,17 +1444,6 @@
   .degradedcard .cb {
     padding: 12px 15px;
   }
-  /* Local-model modal: preset quick-picks under the URL field. */
-  .presets {
-    display: flex;
-    gap: 6px;
-    margin-top: 8px;
-  }
-  .presets .btn.active {
-    border-color: var(--accent-line);
-    color: var(--accent);
-  }
-
   /* Custom task-type row actions (Default column — a custom type has no default to show). */
   .ctacts {
     display: flex;
