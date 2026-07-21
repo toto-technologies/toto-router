@@ -428,6 +428,15 @@
     unknown_model: 'model',
   };
 
+  // Authoring aids: built-in descriptions as reference material (a curated handful, not the whole
+  // table), and a soft thin-description warning. The backend hard-rejects under 3 words; the UI
+  // nudges earlier, at under 5 — client-side only, no classifier calls.
+  const CT_EXEMPLARS = ['brainstorming', 'classification', 'summarization', 'code_generation', 'extraction'];
+  const ctExamples = $derived((routingQ.data?.labels ?? [])
+    .filter((r) => CT_EXEMPLARS.includes(r.label) && r.desc));
+  const ctWords = $derived(ctDesc.trim() ? ctDesc.trim().split(/\s+/).length : 0);
+  const ctThin = $derived(ctWords > 0 && ctWords < 5);
+
   function openAdd() {
     ctEditing = null;
     ctName = '';
@@ -1274,7 +1283,28 @@
     <label for="ct-desc">Description</label>
     <input id="ct-desc" bind:value={ctDesc} placeholder="extract line items and totals from an invoice" />
     {#if ctErr?.field === 'desc'}<div class="fielderr">{ctErr.message}</div>{/if}
-    <div class="fieldnote">The classifier routes requests to this type by matching this description.</div>
+    {#if ctThin}
+      <div class="descwarn">Probably too thin for the classifier to match reliably — aim for one full sentence.</div>
+    {/if}
+    <div class="fieldnote">
+      The classifier matches every incoming prompt against this line — it <b>is</b> the routing
+      behavior. Describe the request (what the user asks for) in one focused sentence, concrete and
+      distinct from the existing types: overlap a built-in and you steal its traffic.
+    </div>
+    <div class="descpair">
+      <span class="good">✓ writing or explaining SQL queries against a relational database</span>
+      <span class="bad">✗ database stuff</span>
+    </div>
+    {#if ctExamples.length}
+      <details class="exemplars">
+        <summary>How the built-ins describe themselves</summary>
+        <ul>
+          {#each ctExamples as r (r.label)}
+            <li><span class="n">{r.label}</span> — {r.desc}</li>
+          {/each}
+        </ul>
+      </details>
+    {/if}
   </div>
   <div class="field">
     <label for="ct-model">Bound model</label>
@@ -1455,6 +1485,59 @@
   .degradedcard .cb {
     padding: 12px 15px;
   }
+  /* Task-type authoring aids in the Add/Edit modal — component-scoped (app.css is off-limits
+     while the typography pass runs). */
+  .descwarn {
+    margin-top: 6px;
+    font-size: 0.71875rem;
+    color: var(--warn);
+  }
+  .descpair {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 7px;
+    font-size: 0.71875rem;
+  }
+  .descpair .good {
+    color: var(--good);
+  }
+  .descpair .bad {
+    color: var(--text-3);
+    text-decoration: line-through;
+  }
+  .exemplars {
+    margin-top: 9px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 7px 10px;
+    background: var(--panel-2);
+  }
+  .exemplars summary {
+    cursor: pointer;
+    font-size: 0.71875rem;
+    color: var(--text-2);
+    user-select: none;
+  }
+  .exemplars summary:hover {
+    color: var(--text);
+  }
+  .exemplars ul {
+    margin: 7px 0 2px;
+    padding-left: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .exemplars li {
+    font-size: 0.71875rem;
+    color: var(--text-2);
+    line-height: 1.45;
+  }
+  .exemplars li .n {
+    color: var(--text);
+  }
+
   /* Custom task-type row actions (Default column — a custom type has no default to show). */
   .ctacts {
     display: flex;

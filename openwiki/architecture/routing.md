@@ -137,3 +137,16 @@ operator's routing overlay under that `local` key, so a binding set in the conso
 operator's own `Bearer <token>` traffic — resolved fresh per request, so edits apply live. The
 overlay carries per-label bindings, custom labels, the optimize preset, and the per-label stick TTLs.
 Team- and org-scoped policies are a hosted-product concern and are absent here.
+
+### Writing task-type descriptions
+
+A custom task type's `desc` is not documentation — it **is** the routing behavior: the classifier
+reads every incoming prompt and matches it against these descriptions. Rules (enforced at the
+routing-policy PUT; descriptions under 3 words are rejected):
+
+- Describe the REQUEST — what the user asks for — behaviorally and concretely, not the domain.
+- One focused sentence.
+- Distinguishable from the existing types: a description that overlaps a built-in (say,
+  `summarization`) will steal that type's traffic.
+
+Good: `writing or explaining SQL queries against a relational database`. Bad: `database stuff`.
