@@ -13,7 +13,7 @@
   import SkeletonCard from '$lib/components/SkeletonCard.svelte';
   import { WIDGETS, rangeLabel } from '$lib/overview/registry.js';
   import { createLayout } from '$lib/overview/layout.svelte.js';
-  import { headerHealthClause } from '$lib/overview/telemetry.js';
+  import { headerHealthClause, usd } from '$lib/overview/telemetry.js';
 
   const reduced = () =>
     typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -53,8 +53,6 @@
   });
   const spendReady = $derived(usage.status === 'ok' || usage.status === 'empty');
   const spend = $derived((usage.data?.rows ?? []).reduce((s, r) => s + (+r.cost_usd || 0), 0));
-  // Whole dollars below $10k, "$12.4k" above (brief §4 number rules).
-  const usd = (n) => (n >= 10000 ? '$' + (n / 1000).toFixed(1) + 'k' : '$' + Math.round(n || 0).toLocaleString('en-US'));
   // One page-level health fetch feeds the clause (the widget owns its own 30s poll);
   // non-admin / error / no providers → the clause is omitted, the sentence still stands.
   const health = query(() => getProviderHealth({}), { isEmpty: (d) => !d?.providers?.length });

@@ -13,7 +13,7 @@
   import SegmentedControl from '$lib/components/SegmentedControl.svelte';
   import Modal from '$lib/components/Modal.svelte';
   import { revealIn } from '$lib/motion.js';
-  import { METRICS, toStacks, toBreakdown, fmtUsd, fmtCompact } from '$lib/usage.js';
+  import { METRICS, toStacks, toBreakdown, fmtUsd, fmtUsdCell, fmtCompact } from '$lib/usage.js';
 
   // Inlined edition check (not $lib/edition.js) so single-tenant branches fold at build time —
   // vite.config.js `define`. OSS has no teams or per-user attribution: group by model/provider/task.
@@ -164,20 +164,38 @@
         {/if}
       </div>
       <div class="cb">
-        {#if stacks && stacks.columns.length}
-          <div class="stack">
-            {#each stacks.columns as col}
-              <div class="stackcol" title="{col.bucket} · {mFmt(col.total)}">
-                {#each col.segments as seg}
-                  <div class="seg2" style="height:{(seg.value / stacks.max) * H}px;background:{seg.color}"></div>
+        {#if stacks && stacks.columns.filter((c) => c.total > 0).length >= 2}
+          <div class="chartgrid">
+            <div class="yax num" aria-hidden="true">
+              <span>{mFmt(stacks.max)}</span>
+              <span>{mFmt(stacks.max / 2)}</span>
+              <span>{mFmt(0)}</span>
+            </div>
+            <div class="plot">
+              <div class="plotarea">
+                <div class="gline" style="top:0"></div>
+                <div class="gline" style="top:50%"></div>
+                <div class="stack">
+                  {#each stacks.columns as col}
+                    <div class="stackcol" title="{col.bucket} · {mFmt(col.total)}">
+                      {#each col.segments as seg}
+                        <div class="seg2" style="height:{(seg.value / stacks.max) * H}px;background:{seg.color}"></div>
+                      {/each}
+                    </div>
+                  {/each}
+                </div>
+              </div>
+              <div class="stackx">
+                {#each stacks.columns as col, i}
+                  <span>{i % 2 === 0 ? col.bucket.slice(5) : ''}</span>
                 {/each}
               </div>
-            {/each}
+            </div>
           </div>
-          <div class="stackx">
-            {#each stacks.columns as col, i}
-              <span>{i % 2 === 0 ? col.bucket.slice(5) : ''}</span>
-            {/each}
+        {:else if stacks && stacks.columns.length}
+          <!-- A single busy bucket has no trend to draw — a full-bleed block would just be loud. -->
+          <div class="muted lowdata">
+            {breakdown ? `${fmtCompact(breakdown.total.requests)} ${breakdown.total.requests === 1 ? 'request' : 'requests'} · ${fmtUsd(breakdown.total.cost)} — ` : ''}not enough {gran === 'day' ? 'days' : 'hours'} of traffic for a trend yet.
           </div>
         {:else}
           <div class="muted" style="padding:24px 0;text-align:center">No time-series data for this window.</div>
@@ -197,13 +215,16 @@
           </tr></thead>
           <tbody>
             {#each breakdown.items as row}
+              {@const cost = fmtUsdCell(row.cost)}
+              {@const sav = fmtUsdCell(row.savings)}
+              {@const fc = fmtUsdCell(row.forecast)}
               <tr>
                 <td><b>{row.name}</b></td>
                 <td class="r n">{fmtCompact(row.requests)}</td>
                 <td class="r n">{fmtCompact(row.tokens)}</td>
-                <td class="r n">{fmtUsd(row.cost)}{#if row.estimated}<span class="est">~</span>{/if}</td>
-                <td class="r n saved">{fmtUsd(row.savings)}</td>
-                <td class="r n" class:est={row.forecastEstimated}>{fmtUsd(row.forecast)}{#if row.forecastEstimated} ⚠{/if}</td>
+                <td class="r n" title={cost.title}>{cost.text}{#if row.estimated}<span class="est">~</span>{/if}</td>
+                <td class="r n saved" title={sav.title}>{sav.text}</td>
+                <td class="r n" class:est={row.forecastEstimated} title={fc.title}>{fc.text}{#if row.forecastEstimated} ⚠{/if}</td>
               </tr>
             {/each}
           </tbody>
@@ -212,9 +233,9 @@
               <td style="padding:11px 14px"><b>Org total</b></td>
               <td class="r n" style="padding:11px 14px">{fmtCompact(breakdown.total.requests)}</td>
               <td class="r n" style="padding:11px 14px">{fmtCompact(breakdown.total.tokens)}</td>
-              <td class="r n" style="padding:11px 14px;color:var(--text);font-weight:calc(700 + (var(--ui-weight) - 400))">{fmtUsd(breakdown.total.cost)}</td>
-              <td class="r n saved" style="padding:11px 14px">{fmtUsd(breakdown.total.savings)}</td>
-              <td class="r n est" style="padding:11px 14px">{fmtUsd(breakdown.total.forecast)}</td>
+              <td class="r n" style="padding:11px 14px;color:var(--text);font-weight:calc(700 + (var(--ui-weight) - 400))" title={fmtUsdCell(breakdown.total.cost).title}>{fmtUsdCell(breakdown.total.cost).text}</td>
+              <td class="r n saved" style="padding:11px 14px" title={fmtUsdCell(breakdown.total.savings).title}>{fmtUsdCell(breakdown.total.savings).text}</td>
+              <td class="r n est" style="padding:11px 14px" title={fmtUsdCell(breakdown.total.forecast).title}>{fmtUsdCell(breakdown.total.forecast).text}</td>
             </tr>
           </tfoot>
         </table>
@@ -243,11 +264,12 @@
           <thead><tr>{#if !OSS}<th>Team</th>{/if}<th>Model</th><th class="r">Tokens</th><th class="r">Cost</th></tr></thead>
           <tbody>
             {#each ex.data.line_items as li}
+              {@const cost = fmtUsdCell(li.cost_usd)}
               <tr>
                 {#if !OSS}<td class="n">{li.team_id ?? '—'}</td>{/if}
                 <td class="modelid">{li.model}</td>
                 <td class="r n">{fmtCompact(li.quantity_tokens)}</td>
-                <td class="r n">{fmtUsd(li.cost_usd)}{#if li.estimated}<span class="est">~</span>{/if}</td>
+                <td class="r n" title={cost.title}>{cost.text}{#if li.estimated}<span class="est">~</span>{/if}</td>
               </tr>
             {/each}
           </tbody>
@@ -260,3 +282,21 @@
     </div>
   {/if}
 </Modal>
+
+<style>
+  /* y-axis gutter + hairline gridlines for the stacked chart (app.css .stack stays the mark layer) */
+  .chartgrid { display: flex; gap: 10px; }
+  .yax {
+    display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end;
+    height: 210px; font-size: 0.625rem; color: var(--text-3); white-space: nowrap;
+  }
+  .yax span { transform: translateY(-0.5em); }
+  .yax span:last-child { transform: translateY(0.35em); }
+  .plot { flex: 1; min-width: 0; }
+  .plotarea { position: relative; }
+  .plotarea :global(.stack) { padding-top: 0; }
+  .gline { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--line-2); pointer-events: none; }
+  /* 2px surface gap between stacked segments so adjacent fills never fuse */
+  .plotarea :global(.stackcol) { gap: 2px; }
+  .lowdata { padding: 24px 0; text-align: center; font-family: var(--mono); }
+</style>

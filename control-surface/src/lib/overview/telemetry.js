@@ -1,6 +1,7 @@
 // Pure view-model helpers for the telemetry widgets (SpendKpis, RequestVolume, ProviderHealth,
 // CacheSavings). Rune-free on purpose so `node --test` covers them (tests/overview-telemetry.test.js).
 import { providerLabel } from '../models.js';
+import { fmtUsd } from '../usage.js';
 
 const RANGE_MS = { '24h': 24 * 3600e3, '7d': 7 * 864e5, '30d': 30 * 864e5 };
 
@@ -21,12 +22,12 @@ export function rangeWindow(range, now = Date.now()) {
 export const prevLabel = (r) =>
   ({ '24h': 'yesterday', '7d': 'last week', '30d': 'last month' })[r] ?? 'the prior period';
 
-// ---- formatting (brief §4: whole dollars below $10k, $12.4k above; compact counts) ----
+// ---- formatting (brief §4: "$12.4k" above $10k, compact counts; sub-cent honesty below) ----
 
 export function usd(n) {
-  n = Math.round(n || 0);
+  n = Number(n) || 0;
   if (n >= 10000) return '$' + (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
-  return '$' + n.toLocaleString('en-US');
+  return fmtUsd(n);
 }
 
 export function count(n) {
