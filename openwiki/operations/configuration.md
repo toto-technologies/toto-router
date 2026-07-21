@@ -77,7 +77,7 @@ only the answer text is a deterministic stub, so no keys, network, or GPU are ne
 |-----|---------|--------|
 | `TOTO_GW_TRACE_STDOUT` | on | one JSON trace line per turn to stdout |
 | `TOTO_GW_TRACE_JSONL` | `traces.jsonl` | append-only trace file |
-| `TOTO_GW_TRACE_DB` | — | trace DB: a SQLite path or a `postgresql://…` URL. **Required for the console's Activity/Usage tabs** |
+| `TOTO_GW_TRACE_DB` | `sqlite:///<data-dir>/traces.db` | trace DB backing the console's Activity/Usage tabs: a SQLite URL/path or a `postgresql://…` URL. Unset with a file-backed gateway DB → defaults to a SQLite DB beside it, so those tabs work out of the box; `:memory:`/Postgres boots get no default. Set `off` to disable tracing explicitly |
 | `TOTO_GW_LOG_CONTENT` | on | store prompt + response text in `request_content` (needs a trace DB) |
 | `TOTO_GW_CONTENT_RETENTION_DAYS` | `30` | age out captured content (0 = keep forever) |
 
@@ -91,7 +91,7 @@ There are two stores, both defaulting to SQLite files under `data/`:
 |-----|---------|--------|
 | `TOTO_GW_DB` | `data/gateway.db` | the app store (accounts/auth, and the driver's sessions when on). `:memory:` in tests |
 | `TOTO_GW_DATABASE_URL` | — | set to a `postgresql://…` URL to run the stores on Postgres instead of SQLite |
-| `TOTO_GW_TRACE_DB` | — | the trace/metering store (above), independent of the app store |
+| `TOTO_GW_TRACE_DB` | `sqlite:///<data-dir>/traces.db` | the trace/metering store (above), independent of the app store; defaulted beside `TOTO_GW_DB` when that is a file, `off` to disable |
 
 Postgres connection-pool tunables (`TOTO_GW_POOL_MIN` / `_MAX` / `_TIMEOUT`) apply in PG mode only.
 

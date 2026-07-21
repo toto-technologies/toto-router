@@ -11,3 +11,4 @@ control-surface/build/
 control-surface/.svelte-kit/
 control-surface/src/routes-oss/
 .DS_Store
+data/

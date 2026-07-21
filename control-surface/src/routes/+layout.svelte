@@ -58,6 +58,9 @@
   );
   const spendReady = $derived(usage.status === 'ok' || usage.status === 'empty');
   const spend = $derived((usage.data?.rows ?? []).reduce((s, r) => s + (Number(r.cost_usd) || 0), 0));
+  // No trace DB (TOTO_GW_TRACE_DB=off, or a deploy without one): the endpoint answers an honest
+  // empty rollup with trace_db:false — show "not tracked" rather than a misleading "$0.00".
+  const trackingOff = $derived(usage.data?.trace_db === false);
 
   /** email local-part -> a friendly display name ("alex.funk" -> "Alex Funk"). */
   function displayName(email) {
@@ -183,9 +186,14 @@
     </div>
 
     <div class="topright">
-      <div class="spendchip" title="{orgName} spend this billing period (month to date)">
+      <div class="spendchip" title={trackingOff
+        ? 'Usage tracking is off — no trace database is configured (TOTO_GW_TRACE_DB)'
+        : `${orgName} spend this billing period (month to date)`}>
         <span class="lab">Spend</span>
-        <span class="val"><b>{spendReady ? money(spend) : '—'}</b><span>&nbsp;this month</span></span>
+        <span class="val">
+          {#if trackingOff}<span>not tracked</span>
+          {:else}<b>{spendReady ? money(spend) : '—'}</b><span>&nbsp;this month</span>{/if}
+        </span>
       </div>
       <button class="iconbtn" title="Toggle light / dark" aria-label="Toggle theme" onclick={toggleTheme}>
         <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z" /></svg>
