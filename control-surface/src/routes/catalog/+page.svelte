@@ -39,6 +39,7 @@
     getEffectiveModels,
     getCatalogModels,
     getFireworksSync,
+    deleteAdoption,
   } from '$lib/api/admin.js';
   import { toFailMatrix, failPolicyBody } from '$lib/failpolicy.js';
   import SegmentedControl from '$lib/components/SegmentedControl.svelte';
@@ -491,7 +492,11 @@
   // ---- Section B · provider-module catalog + Section C · Fireworks sync ----------------------
   // Both are org-wide reads, independent of the scope selector. The sync endpoint is always-200:
   // key-missing and upstream failure arrive as {key_present, error} data, never as query errors.
-  const catQ = query(() => getCatalogModels(), { isEmpty: (d) => !d?.models?.length });
+  // OSS reads the EFFECTIVE catalog (base + the local scope's adoptions, same row shape) so an
+  // adopted model shows up here, not only in the binding dropdowns; enterprise keeps the global
+  // shipped-catalog view (effective-models needs a named scope the operator may not have).
+  const catQ = query(() => (OSS ? getEffectiveModels() : getCatalogModels()),
+                     { isEmpty: (d) => !d?.models?.length });
   const syncQ = query(() => getFireworksSync(), { isEmpty: () => false });
   const providerGroups = $derived(groupByProvider(catQ.data?.models ?? []));
   const sync = $derived(syncQ.data);
@@ -529,6 +534,65 @@
 
   // The model LIBRARY (discovery panels) moved to /models — this page keeps the curated
   // catalog view; the Fireworks sync panel's Adopt/Fix ref still uses the YAML modal above.
+
+  // ---- Remove an adopted model (Section B rows with source === 'adopted') --------------------
+  // Base catalog models are YAML-owned and not removable here; adoptions are DB rows with a
+  // DELETE endpoint. The confirm modal names every task type pointing at the model and reverts
+  // them on confirm — a dangling binding would silently fall back at dispatch, but leaving it
+  // stored is exactly the stale-binding mess the routing view has to flag.
+  let removeAdoptedOpen = $state(false);
+  let removeTarget = $state(null); // the section-B catalog row being removed
+  let removingAdopted = $state(false);
+  let removeAdoptedErr = $state(null);
+
+  // Task types currently pointing at `id` in the EDITED view (what the user sees on this page).
+  function bindingsOn(id) {
+    const builtins = (routingQ.data?.labels ?? []).filter(
+      (r) => !r.custom && r.bindable && (routeSel[r.label] ?? r.model) === id);
+    const customs = customLabels.filter((c) => (routeSel[c.name] ?? c.model) === id);
+    return { builtins, customs };
+  }
+  function openRemoveAdopted(m) {
+    removeTarget = m;
+    removeAdoptedErr = null;
+    removeAdoptedOpen = true;
+  }
+  const removeAffected = $derived(
+    removeTarget ? bindingsOn(removeTarget.id) : { builtins: [], customs: [] });
+  // Where a custom type lands when its model is removed: the Generalist's (post-revert) pick —
+  // the designated catch-all. A custom type can't go unbound (the policy PUT requires a model).
+  const removeFallback = $derived.by(() => {
+    if (!removeTarget) return null;
+    const other = (routingQ.data?.labels ?? []).find((r) => r.label === 'other');
+    const cur = routeSel['other'] ?? other?.model;
+    return cur === removeTarget.id ? other?.default_model : cur;
+  });
+  async function confirmRemoveAdopted() {
+    removingAdopted = true;
+    removeAdoptedErr = null;
+    const id = removeTarget.id;
+    try {
+      const { builtins, customs } = bindingsOn(id);
+      const classifierHit = classifierModel === id;
+      if (builtins.length || customs.length || classifierHit) {
+        const sel = { ...routeSel };
+        for (const r of builtins) sel[r.label] = r.default_model;
+        const fb = removeFallback;
+        for (const c of customs) sel[c.name] = fb;
+        routeSel = sel;
+        if (classifierHit) classifierModel = '';
+        await saveCustomList(customLabels.map((c) =>
+          customs.some((x) => x.name === c.name) ? { ...c, model: fb } : c));
+      }
+      await deleteAdoption(id);
+      await Promise.all([modelsQ.reload(), catQ.reload()]);
+      removeAdoptedOpen = false;
+    } catch (e) {
+      removeAdoptedErr = e?.message ?? 'Could not remove the model';
+    } finally {
+      removingAdopted = false;
+    }
+  }
 </script>
 
 <svelte:head><title>Catalog &amp; Routing · Toto Control</title></svelte:head>
@@ -872,6 +936,7 @@
                     <div class="mname">
                       {displayName(m)}
                       {#if m.fine_tuned}<span class="ftbadge">Fine-tuned · yours</span>{/if}
+                      {#if m.source === 'adopted'}<span class="ftbadge">Added by you</span>{/if}
                     </div>
                     <div class="malias">
                       <span class="idchip n">{m.id}</span>
@@ -889,6 +954,16 @@
                     {/if}
                   </td>
                   <td class="dcol">
+                    {#if m.source === 'adopted'}
+                      <button
+                        class="disclose rmadopt"
+                        title="Remove from catalog"
+                        aria-label="Remove {m.id} from catalog"
+                        onclick={() => openRemoveAdopted(m)}
+                      >
+                        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                      </button>
+                    {/if}
                     <button
                       class="disclose"
                       class:open={expanded.has(m.id)}
@@ -1192,6 +1267,41 @@
   {/snippet}
 </Modal>
 
+<!-- ===== Remove adopted model (Section B) ===== -->
+<Modal
+  bind:open={removeAdoptedOpen}
+  title="Remove from catalog"
+  subtitle={removeTarget
+    ? `“${displayName(removeTarget)}” (${removeTarget.id}) was added from the ${providerLabel(removeTarget.provider)} library.`
+    : ''}
+>
+  {#if removeAffected.builtins.length || removeAffected.customs.length}
+    <div class="rmwarn">
+      <b>Task types currently using this model</b>
+      <ul>
+        {#each removeAffected.builtins as r (r.label)}
+          <li><span class="n">{r.label === 'other' ? 'Generalist' : r.label}</span> — reverts to its default, {prettyId(r.default_model)}</li>
+        {/each}
+        {#each removeAffected.customs as c (c.name)}
+          <li><span class="n">{c.name}</span> (custom) — will use {prettyId(removeFallback)}</li>
+        {/each}
+      </ul>
+    </div>
+  {:else}
+    <p class="rmnote">No task types point at this model. It disappears from the catalog and every model picker.</p>
+  {/if}
+  {#if removeTarget && classifierModel === removeTarget.id}
+    <p class="rmnote">This model also reads your prompts to route them — that resets to the platform default.</p>
+  {/if}
+  {#if removeAdoptedErr}<div class="fielderr">{removeAdoptedErr}</div>{/if}
+  {#snippet footer()}
+    <button class="btn ghost" onclick={() => (removeAdoptedOpen = false)}>Cancel</button>
+    <button class="btn primary" disabled={removingAdopted} onclick={confirmRemoveAdopted}>
+      {removingAdopted ? 'Removing…' : 'Remove model'}
+    </button>
+  {/snippet}
+</Modal>
+
 <!-- ===== Adopt / Fix-ref YAML modal (Fireworks sync drift rows) ===== -->
 <Modal bind:open={yamlOpen} title={yamlModal?.title ?? ''} subtitle={yamlModal?.instruction ?? ''}>
   <pre class="yamlblock n">{yamlModal?.yaml ?? ''}</pre>
@@ -1277,6 +1387,30 @@
   .ctacts {
     display: flex;
     gap: 6px;
+  }
+  /* Adopted-row remove: the disclose icon-button family, danger on hover. */
+  .rmadopt:hover {
+    color: var(--crit);
+    background: var(--crit-soft);
+  }
+  .rmwarn {
+    padding: 10px 12px;
+    border: 1px solid var(--warn);
+    background: var(--warn-soft);
+    border-radius: 9px;
+    font-size: 0.78125rem;
+  }
+  .rmwarn ul {
+    margin: 6px 0 0;
+    padding-left: 18px;
+  }
+  .rmwarn li {
+    margin: 2px 0;
+  }
+  .rmnote {
+    margin: 8px 0 0;
+    font-size: 0.78125rem;
+    color: var(--text-2);
   }
   .btn.danger {
     color: var(--crit);

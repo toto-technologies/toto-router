@@ -275,7 +275,12 @@ async def _operator_identity(settings, auth) -> Identity:
     if settings.edition.strip().lower() != "oss":
         return OPERATOR
     routing_policy = await _resolve_routing_policy(auth, OSS_LOCAL_ORG, None)
-    return replace(OPERATOR, org_id=OSS_LOCAL_ORG, routing_policy=routing_policy)
+    # Adoptions live under the same `local` scope the operator writes them to (admin_catalog_
+    # adoptions._scope_key reads org_id) — without resolving them here, an adopted model is
+    # bindable in the console but invisible to the operator's own dispatch and /v1/models.
+    adoptions = await _resolve_adoptions(auth, OSS_LOCAL_ORG, None)
+    return replace(OPERATOR, org_id=OSS_LOCAL_ORG, routing_policy=routing_policy,
+                   catalog_adoptions=adoptions)
 
 
 async def _resolve_identity(request: Request) -> Identity:
