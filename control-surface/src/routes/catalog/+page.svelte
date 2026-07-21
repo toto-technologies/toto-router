@@ -40,6 +40,7 @@
     getCatalogModels,
     getFireworksSync,
     deleteAdoption,
+    createLocalModel,
   } from '$lib/api/admin.js';
   import { toFailMatrix, failPolicyBody } from '$lib/failpolicy.js';
   import SegmentedControl from '$lib/components/SegmentedControl.svelte';
@@ -567,6 +568,47 @@
     const cur = routeSel['other'] ?? other?.model;
     return cur === removeTarget.id ? other?.default_model : cur;
   });
+  // ---- Advanced controls disclosure ("When routing degrades") --------------------------------
+  // Collapsed by default so the routing table leads the page; the open state sticks per browser.
+  let degradedOpen = $state(browser && localStorage.getItem('toto.catalog.advanced') === '1');
+  function toggleDegraded() {
+    degradedOpen = !degradedOpen;
+    if (browser) localStorage.setItem('toto.catalog.advanced', degradedOpen ? '1' : '0');
+  }
+
+  // ---- Add local model (an OpenAI-compatible server on the user's machine/LAN) ---------------
+  const LOCAL_PRESETS = [
+    ['Ollama', 'http://localhost:11434/v1'],
+    ['LM Studio', 'http://localhost:1234/v1'],
+    ['vLLM', 'http://localhost:8000/v1'],
+  ];
+  let lmOpen = $state(false);
+  let lmName = $state('');
+  let lmUrl = $state('');
+  let lmModel = $state('');
+  let lmErr = $state(null);
+  let lmSaving = $state(false);
+  function openLocal() {
+    lmName = '';
+    lmUrl = '';
+    lmModel = '';
+    lmErr = null;
+    lmOpen = true;
+  }
+  async function submitLocal() {
+    lmSaving = true;
+    lmErr = null;
+    try {
+      await createLocalModel({ name: lmName.trim(), baseUrl: lmUrl.trim(), model: lmModel.trim() });
+      await Promise.all([catQ.reload(), modelsQ.reload()]);
+      lmOpen = false;
+    } catch (e) {
+      lmErr = e?.message ?? 'Could not add the local model';
+    } finally {
+      lmSaving = false;
+    }
+  }
+
   async function confirmRemoveAdopted() {
     removingAdopted = true;
     removeAdoptedErr = null;
@@ -649,45 +691,41 @@
   {:else if !OSS && teamsQ.status === 'error'}
     {@render deadend('Could not load teams', teamsQ.error?.message ?? 'Unknown error')}
   {:else}
-  <!-- ===== SCOPE CONTEXT · org-default routing or one team ===== -->
-  <div class="teamband">
-    <div class="teamemblem">{emblem}</div>
-    <div class="teamlead">
-      {#if !OSS}
+  {#if !OSS}
+    <!-- Scope context: the team switcher needs a home; OSS is single-tenant and the page header
+         already says everything this band would. -->
+    <div class="teamband">
+      <div class="teamemblem">{emblem}</div>
+      <div class="teamlead">
         <div class="teamswitch">
           <select class="teambtn teamsel" bind:value={teamId} aria-label="Team">
             <option value={ORG}>Organization (default)</option>
             {#each teams as t}<option value={t.team_id}>{t.name}</option>{/each}
           </select>
         </div>
-      {/if}
-      <div class="teamframe">
-        <b>{OSS ? 'Routing policy' : `Routing — ${teamName}`}</b>
-        <span>
-          {#if OSS}
-            Default model choices for all traffic through this gateway.
-          {:else if isOrg}
-            Default model choices for owner and API-token traffic without a team.
-          {:else}
-            Which model each task type uses for the {teamName} team.
-          {/if}
-        </span>
+        <div class="teamframe">
+          <b>Routing — {teamName}</b>
+          <span>
+            {#if isOrg}
+              Default model choices for owner and API-token traffic without a team.
+            {:else}
+              Which model each task type uses for the {teamName} team.
+            {/if}
+          </span>
+        </div>
       </div>
-    </div>
-    {#if !OSS}
       <div class="teamright">
         <span class="chip"><span class="d" style="background:var(--accent-2)"></span>{teamName}</span>
       </div>
-    {/if}
-  </div>
+    </div>
+  {/if}
 
-  <!-- ===== SECTION A · TASK ROUTING ===== -->
-  <div class="secthead">
-    <span class="sn">A</span>
+  <!-- ===== TASK ROUTING — the core of the page ===== -->
+  <div class="secthead core">
     <h2>Task routing</h2>
     <span class="hint">
-      Every request in {teamName} is classified into a task type; each type auto-selects
-      one catalog model. Pick a model, or leave it on the clear default.
+      Every request{OSS ? '' : ` in ${teamName}`} is classified into a task type; each type
+      auto-selects one catalog model. Pick a model, or leave it on the clear default.
     </span>
   </div>
 
@@ -704,88 +742,6 @@
         + Add task type
       </button>
     </div>
-    {#if isOrg}
-      <div class="failbox">
-        <div class="failhead">
-          <span class="lab">When smart routing is unavailable</span>
-          <span class="exp">Choose per failure reason whether to keep serving (fall back to a default
-            model) or reject the request with an error.</span>
-        </div>
-        {#each FAIL_REASONS as r (r.key)}
-          <div class="failrow">
-            <div class="failwhat">
-              <b>{r.label}</b>
-              <span class="exp">{r.hint}</span>
-            </div>
-            <SegmentedControl options={FAIL_OPTS} bind:value={failMatrix[r.key]} />
-          </div>
-        {/each}
-      </div>
-
-      <!-- W3-C1 pluggable classifier: which model reads each prompt to route it. -->
-      <div class="optbar">
-        <span class="lab">Which model reads your prompts to route them</span>
-        <select class="clsel" bind:value={classifierModel}>
-          <option value="">Default (platform classifier)</option>
-          {#each classifierOpts as id}
-            <option value={id}>{classifierOptLabel(id)}</option>
-          {/each}
-        </select>
-        {#if classifierModel}
-          {#if isPerim(classifierModel)}
-            <span class="chip perim"><span class="d"></span>in-perimeter</span>
-          {:else}
-            <span class="chip cloud"><span class="d"></span>cloud</span>
-          {/if}
-        {/if}
-        <span class="exp">
-          {#if classifierLeaks}
-            <strong class="warn">This model runs in the cloud. Your data-classification rules require
-              the classifier to stay in-perimeter — pick an in-perimeter model or Save will be rejected.</strong>
-          {:else}
-            It reads every prompt before routing, so a data-restricted org should keep it in-perimeter.
-          {/if}
-        </span>
-      </div>
-
-      <!-- W2-C7 data classification: org-defined sensitivity labels bound to residency constraints. -->
-      <div class="taxbox">
-        <div class="taxhead">
-          <span class="lab">Data classification</span>
-          <span class="exp">Every request is also classified for data sensitivity; the constraint
-            here holds even when a client names a model directly.</span>
-          <button class="btn small" style="margin-left:auto" onclick={addTaxRow}>+ Add label</button>
-        </div>
-        {#if taxLabels.length === 0}
-          <div class="taxempty">No data-classification labels. Requests route without a data-policy constraint.</div>
-        {:else}
-          <div class="taxrows">
-            {#each taxLabels as row, i (i)}
-              <div class="taxrow">
-                <input class="taxname" placeholder="label (e.g. restricted)" bind:value={row.name} />
-                <input class="taxdesc" placeholder="what this covers, in plain language" bind:value={row.desc} />
-                <select class="taxsel" bind:value={row.constraint}>
-                  {#each CONSTRAINT_OPTS as [val, label]}
-                    <option value={val}>{label}</option>
-                  {/each}
-                </select>
-                <button class="btn small ghost" title="Remove" onclick={() => removeTaxRow(i)}>✕</button>
-              </div>
-            {/each}
-          </div>
-          <div class="taxdefault">
-            <span class="lab">If a request can’t be classified</span>
-            <select bind:value={taxDefault}>
-              <option value="">No constraint</option>
-              {#each taxNames as name}
-                <option value={name}>Apply “{name}”</option>
-              {/each}
-            </select>
-          </div>
-        {/if}
-      </div>
-    {/if}
-
     {#if routingQ.status === 'loading'}
       <div style="padding:15px"><SkeletonTable rows={6} cols={3} title={false} /></div>
     {:else if routingQ.status === 'forbidden' || routingQ.status === 'unauthed'}
@@ -793,7 +749,8 @@
     {:else if routingQ.status === 'error'}
       {@render deadend('Could not load routing', routingQ.error?.message ?? 'Unknown error')}
     {:else}
-      <div class="tablewrap scrollist" in:revealIn>
+      <!-- Full height, no inner scroll well — the routing table is the core of the page. -->
+      <div class="tablewrap" in:revealIn>
         <table class="tasktable">
           <thead>
             <tr><th style="width:34%">Task type</th><th>Auto-selects model</th><th>Default</th><th title="How long a conversation stays pinned to its first routed model">Hold</th></tr>
@@ -887,15 +844,115 @@
       </div>
     {/if}
   </div>
+
+  {#if isOrg}
+    <!-- Advanced controls, out of the routing table's way: failure modes, the classifier,
+         and data classification. Collapsed by default; open state sticks per browser. -->
+    <div class="card collapsible degradedcard" class:collapsed={!degradedOpen} style="margin-bottom:24px">
+      <div
+        class="ch"
+        role="button"
+        tabindex="0"
+        aria-expanded={degradedOpen}
+        onclick={toggleDegraded}
+        onkeydown={(e) => (e.key === ' ' || e.key === 'Enter') && (e.preventDefault(), toggleDegraded())}
+      >
+        <h3>When routing degrades</h3>
+        <span class="meta">Failure handling · which model reads your prompts · data-sensitivity rules</span>
+        <span class="caret" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg></span>
+      </div>
+      <div class="cb">
+        <div class="failbox">
+          <div class="failhead">
+            <span class="lab">When smart routing is unavailable</span>
+            <span class="exp">Choose per failure reason whether to keep serving (fall back to a default
+              model) or reject the request with an error.</span>
+          </div>
+          {#each FAIL_REASONS as r (r.key)}
+            <div class="failrow">
+              <div class="failwhat">
+                <b>{r.label}</b>
+                <span class="exp">{r.hint}</span>
+              </div>
+              <SegmentedControl options={FAIL_OPTS} bind:value={failMatrix[r.key]} />
+            </div>
+          {/each}
+        </div>
+
+        <!-- Pluggable classifier: which model reads each prompt to route it. -->
+        <div class="optbar">
+          <span class="lab">Which model reads your prompts to route them</span>
+          <select class="clsel" bind:value={classifierModel}>
+            <option value="">Default (platform classifier)</option>
+            {#each classifierOpts as id}
+              <option value={id}>{classifierOptLabel(id)}</option>
+            {/each}
+          </select>
+          {#if classifierModel}
+            {#if isPerim(classifierModel)}
+              <span class="chip perim"><span class="d"></span>in-perimeter</span>
+            {:else}
+              <span class="chip cloud"><span class="d"></span>cloud</span>
+            {/if}
+          {/if}
+          <span class="exp">
+            {#if classifierLeaks}
+              <strong class="warn">This model runs in the cloud. Your data-classification rules require
+                the classifier to stay in-perimeter — pick an in-perimeter model or Save will be rejected.</strong>
+            {:else}
+              It reads every prompt before routing, so a data-restricted org should keep it in-perimeter.
+            {/if}
+          </span>
+        </div>
+
+        <!-- Data classification: org-defined sensitivity labels bound to residency constraints. -->
+        <div class="taxbox">
+          <div class="taxhead">
+            <span class="lab">Data classification</span>
+            <span class="exp">Every request is also classified for data sensitivity; the constraint
+              here holds even when a client names a model directly.</span>
+            <button class="btn small" style="margin-left:auto" onclick={addTaxRow}>+ Add label</button>
+          </div>
+          {#if taxLabels.length === 0}
+            <div class="taxempty">No data-classification labels. Requests route without a data-policy constraint.</div>
+          {:else}
+            <div class="taxrows">
+              {#each taxLabels as row, i (i)}
+                <div class="taxrow">
+                  <input class="taxname" placeholder="label (e.g. restricted)" bind:value={row.name} />
+                  <input class="taxdesc" placeholder="what this covers, in plain language" bind:value={row.desc} />
+                  <select class="taxsel" bind:value={row.constraint}>
+                    {#each CONSTRAINT_OPTS as [val, label]}
+                      <option value={val}>{label}</option>
+                    {/each}
+                  </select>
+                  <button class="btn small ghost" title="Remove" onclick={() => removeTaxRow(i)}>✕</button>
+                </div>
+              {/each}
+            </div>
+            <div class="taxdefault">
+              <span class="lab">If a request can’t be classified</span>
+              <select bind:value={taxDefault}>
+                <option value="">No constraint</option>
+                {#each taxNames as name}
+                  <option value={name}>Apply “{name}”</option>
+                {/each}
+              </select>
+            </div>
+          {/if}
+        </div>
+      </div>
+    </div>
+  {/if}
   {/if}
 
-  <!-- ===== SECTION B · MODEL CATALOG (provider modules) ===== -->
+  <!-- ===== MODEL CATALOG (provider modules) ===== -->
   <div class="secthead">
-    <span class="sn">B</span>
     <h2>Model catalog</h2>
     <span class="hint">
       Every model this gateway can serve, grouped by provider. Expand a row for the wiring details.
     </span>
+    <button class="btn small" onclick={openLocal}>+ Add local model</button>
   </div>
 
   {#if catQ.status === 'loading'}
@@ -917,6 +974,8 @@
           <span class="pfacts">
             <span>{g.models.length} model{g.models.length === 1 ? '' : 's'}</span>
             {#if g.provider === 'openrouter' || g.provider === 'cloudflare'}<span class="pfact">aggregator — many labs, one key</span>{/if}
+            {#if g.provider === 'fake'}<span class="pfact">built-in echo models for verifying your gateway without spending</span>{/if}
+            {#if g.provider === 'local'}<span class="pfact">OpenAI-compatible servers on your machine — nothing leaves your network</span>{/if}
             {#if g.keyEnv}<span class="pfact n" title="The gateway reads this env var for the provider key">key: {g.keyEnv}</span>{/if}
             {#if g.fineTuned}<span class="pfact tuned">{g.fineTuned} fine-tuned</span>{/if}
           </span>
@@ -987,7 +1046,7 @@
                           </b>
                         </div>
                         {#if servingLabel(m)}<div class="df"><span>Serving</span><b>{servingLabel(m)}</b></div>{/if}
-                        <div class="df"><span>Endpoint</span><b class="n">{m.endpoint ?? '—'}</b></div>
+                        <div class="df"><span>Endpoint</span><b class="n">{m.endpoint === 'fake' ? 'built-in echo' : (m.endpoint ?? '—')}</b></div>
                         <div class="df"><span>Base URL</span><b class="n" title={m.base_url}>{m.base_url ?? '—'}</b></div>
                         <!-- api_key_env is only real on openai-shaped endpoints; elsewhere it's a schema default -->
                         {#if m.endpoint === 'openai'}
@@ -1008,9 +1067,8 @@
     {/each}
   {/if}
 
-  <!-- ===== SECTION C · FIREWORKS SYNC ===== -->
+  <!-- ===== FIREWORKS SYNC ===== -->
   <div class="secthead" style="margin-top:24px">
-    <span class="sn">C</span>
     <h2>Fireworks sync</h2>
     <span class="hint">
       Models you fine-tune in Fireworks, checked live against this catalog — adopt new ones, catch
@@ -1102,7 +1160,6 @@
   {#if !isOrg && ready(teamsQ)}
     <!-- ===== SECTION D · TEAM ACCESS ===== -->
     <div class="secthead">
-      <span class="sn">D</span>
       <h2>Team access</h2>
       <span class="hint">
         Which catalog models the {teamName} team is allowed to use at all — this governs availability
@@ -1266,6 +1323,39 @@
   {/snippet}
 </Modal>
 
+<!-- ===== Add local model ===== -->
+<Modal
+  bind:open={lmOpen}
+  title="Add local model"
+  subtitle="Point Toto at an OpenAI-compatible server running on your machine or network. No API key needed."
+>
+  <div class="field">
+    <label for="lm-url">Server URL</label>
+    <input id="lm-url" bind:value={lmUrl} placeholder="http://localhost:11434/v1" spellcheck="false" />
+    <div class="presets">
+      {#each LOCAL_PRESETS as [label, url] (url)}
+        <button class="btn small ghost" class:active={lmUrl === url} onclick={() => (lmUrl = url)}>{label}</button>
+      {/each}
+    </div>
+  </div>
+  <div class="field">
+    <label for="lm-model">Model name</label>
+    <input id="lm-model" bind:value={lmModel} placeholder="llama3.1" spellcheck="false" />
+    <div class="fieldnote">The model name exactly as your server knows it (e.g. `ollama list`).</div>
+  </div>
+  <div class="field">
+    <label for="lm-name">Display name (optional)</label>
+    <input id="lm-name" bind:value={lmName} placeholder="Llama on Ollama" />
+  </div>
+  {#if lmErr}<div class="fielderr">{lmErr}</div>{/if}
+  {#snippet footer()}
+    <button class="btn ghost" onclick={() => (lmOpen = false)}>Cancel</button>
+    <button class="btn primary" disabled={lmSaving || !lmUrl.trim() || !lmModel.trim()} onclick={submitLocal}>
+      {lmSaving ? 'Adding…' : 'Add local model'}
+    </button>
+  {/snippet}
+</Modal>
+
 <!-- ===== Remove adopted model (Section B) ===== -->
 <Modal
   bind:open={removeAdoptedOpen}
@@ -1382,6 +1472,49 @@
     font-size: 0.71875rem;
     color: var(--crit);
   }
+  /* Task routing is the core of the page: section title carries page-level weight, rows read
+     at body size instead of whispering. */
+  .secthead.core {
+    margin: 6px 0 14px;
+  }
+  .secthead.core h2 {
+    font-size: 1.25rem;
+    font-weight: calc(680 + (var(--ui-weight) - 400));
+    letter-spacing: -0.015em;
+  }
+  .secthead.core .hint {
+    font-size: 0.78125rem;
+  }
+  :global(.tasktable .tasktype) {
+    font-size: 0.8125rem;
+    font-weight: calc(500 + (var(--ui-weight) - 400));
+  }
+  :global(.tasktable .taskdesc) {
+    font-size: 0.75rem;
+    max-width: 420px;
+  }
+  :global(.tasktable .routesel) {
+    font-size: 0.8125rem;
+    height: 32px;
+  }
+  :global(.tasktable td) {
+    padding-top: calc(9px * var(--density));
+    padding-bottom: calc(9px * var(--density));
+  }
+  .degradedcard .cb {
+    padding: 12px 15px;
+  }
+  /* Local-model modal: preset quick-picks under the URL field. */
+  .presets {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .presets .btn.active {
+    border-color: var(--accent-line);
+    color: var(--accent);
+  }
+
   /* Custom task-type row actions (Default column — a custom type has no default to show). */
   .ctacts {
     display: flex;
