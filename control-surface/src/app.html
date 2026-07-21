@@ -17,6 +17,18 @@
       } catch (e) {}
     })();
   </script>
+  <script>
+    /* Seamless launch (OSS token gate): a `#token=…` fragment carries the operator token from the
+       boot URL. Apply it to the cookie the gateway reads and strip it from the URL — synchronously,
+       BEFORE the SPA hydrates and fires its identity probe, so the app lands signed-in. Harmless in
+       any edition: a non-matching cookie simply doesn't authenticate. */
+    (function () {
+      var m = /[#&]token=([^&]+)/.exec(location.hash || '');
+      if (!m) return;
+      document.cookie = 'toto_operator=' + decodeURIComponent(m[1]) + '; path=/; SameSite=Lax';
+      history.replaceState(null, '', location.pathname + location.search);
+    })();
+  </script>
 </head>
 <body data-sveltekit-preload-data="hover">
   <div style="display: contents">%sveltekit.body%</div>

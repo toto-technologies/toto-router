@@ -250,6 +250,44 @@ async def test_org_default_policy_applies_to_team_member_bearer_traffic():
 
 
 @pytest.mark.asyncio
+async def test_oss_operator_console_binding_governs_operator_bearer():
+    """OSS identity unification: the console is the operator, and a routing binding it saves (no
+    org_id → the `local` sentinel scope) must govern the operator's OWN bearer traffic. The
+    in-process client already carries the operator bearer, so this is the console→API round trip:
+    PUT the binding, then `smart` chat routes per it."""
+    gw, _ = _gw()
+    settings = default_settings(driver=False, fake_exec=False)  # edition 'oss', operator token on
+    async with in_process_app(gateway=gw, settings=settings) as (client, app):
+        put = await client.put("/v1/admin/org/routing-policy",
+                               json={"bindings": {"code_generation": "or-sonnet-4.6"}})
+        assert put.status_code == 200, put.text
+
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={"model": "smart", "messages": [{"role": "user", "content": "write python"}]},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["model"] == "or-sonnet-4.6"          # the console binding, not the global default
+        assert resp.json()["x_toto"]["route_reason"] == "label:code_generation:team"
+
+
+def test_scope_org_operator_org_default():
+    """Multi-tenant safety guard for the _scope_org seam. An OSS operator carries the `local`
+    sentinel org and resolves there with no explicit org_id; an enterprise operator carries no org,
+    so it must still be told which org to act on (no accidental cross-org write)."""
+    from dataclasses import replace
+
+    from toto_gateway.routes.admin_usage import _scope_org
+    from toto_gateway.routes.deps import OPERATOR
+
+    org, err = _scope_org(replace(OPERATOR, org_id="local"), None)  # OSS operator
+    assert org == "local" and err is None
+
+    org, err = _scope_org(OPERATOR, None)  # enterprise operator (no implicit org)
+    assert org is None and err is not None
+
+
+@pytest.mark.asyncio
 async def test_team_custom_label_routes_to_its_bound_model():
     gw, _ = _gw(label_reply='{"label": "legal_review"}')   # a label only the team invented
     ident = _identity(routing_policy={"custom_labels": [

@@ -233,9 +233,12 @@ def _seed(engine, **kw):
         s.commit()
 
 
-def test_operator_must_name_org(usage_app):
-    client, _app, _engine = usage_app  # default client sends the operator bearer
-    assert client.get("/v1/admin/usage").status_code == 400  # operator, no org_id
+def test_operator_defaults_to_local_org_in_oss(usage_app):
+    client, _app, _engine = usage_app  # default client sends the operator bearer; oss edition
+    # OSS binds the operator to the single `local` tenant, so an org-less call resolves there
+    # (no 400). A named org still wins for an operator that asks for one.
+    r0 = client.get("/v1/admin/usage")
+    assert r0.status_code == 200 and r0.json()["org_id"] == "local"
     r = client.get("/v1/admin/usage", params={"org_id": "o_1"})
     assert r.status_code == 200 and r.json()["org_id"] == "o_1"
 

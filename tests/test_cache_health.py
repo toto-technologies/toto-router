@@ -161,9 +161,10 @@ def test_endpoint_admin_required(usage_app):
     app.dependency_overrides.clear()
 
 
-def test_endpoint_operator_must_name_org(usage_app):
-    client, _app, _engine = usage_app  # default bearer = operator
-    assert client.get("/v1/admin/usage/cache-health").status_code == 400
+def test_endpoint_operator_defaults_to_local_org_in_oss(usage_app):
+    client, _app, _engine = usage_app  # default bearer = operator; oss edition
+    # OSS: the operator is the single `local` tenant, so an org-less call resolves there (no 400).
+    assert client.get("/v1/admin/usage/cache-health").status_code == 200
     assert client.get("/v1/admin/usage/cache-health", params={"org_id": "o_x"}).status_code == 200
 
 

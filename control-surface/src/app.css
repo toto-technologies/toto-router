@@ -158,6 +158,8 @@ button{font-family:inherit;color:inherit}
   display:flex;align-items:center;justify-content:center;font-size:0.6875rem;font-weight:calc(700 + (var(--ui-weight) - 400));color:var(--text)}
 .orgcard .who{min-width:0} .orgcard .who b{display:block;font-size:0.75rem;font-weight:calc(600 + (var(--ui-weight) - 400));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .orgcard .who small{color:var(--text-3);font-size:0.65625rem}
+.railfoot .updates{display:block;margin-top:8px;padding:0 2px;color:var(--text-3);font-size:0.65625rem;text-decoration:none}
+.railfoot .updates:hover{color:var(--text-2);text-decoration:underline}
 
 /* ---- Topbar ---------------------------------------------- */
 .top{grid-row:1;grid-column:2;background:var(--bg-2);border-bottom:1px solid var(--line);
