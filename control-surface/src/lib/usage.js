@@ -13,9 +13,11 @@ export const METRICS = {
   requests: { key: 'requests', label: 'Requests', fmt: fmtCompact },
 };
 
-/** Series palette — cycled by series index. Forest tokens (mockup uses accent/cloud/perimeter). */
+/** Series palette — dedicated chart hues (app.css --series-N), assigned by series index.
+ *  Deliberately excludes green (residency/health signal) and the status tokens, so a model
+ *  series never impersonates a semantic color. */
 export const SERIES_COLORS = [
-  'var(--accent)', 'var(--cloud)', 'var(--perimeter)', 'var(--accent-2)', 'var(--warn)', 'var(--good)',
+  'var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)', 'var(--series-6)',
 ];
 
 const label = (v) => (v == null || v === '' ? 'unattributed' : String(v));
@@ -90,8 +92,24 @@ export function toBreakdown(rows, dim, { periodFraction = 1 } = {}) {
 
 // ---- formatters (mono, tabular) -------------------------------------------------------------
 
+/** Honest currency at any magnitude: whole dollars ≥ $1k, cents ≥ $1, and 2 significant
+ *  figures below that so real sub-cent spend never renders as a dishonest "$0". */
 export function fmtUsd(n) {
-  return '$' + Math.round(Number(n) || 0).toLocaleString('en-US');
+  n = Number(n) || 0;
+  const sign = n < 0 ? '−' : '';
+  const a = Math.abs(n);
+  if (a >= 1000) return sign + '$' + Math.round(a).toLocaleString('en-US');
+  if (a >= 1) return sign + '$' + a.toFixed(2);
+  if (a > 0) return sign + '$' + parseFloat(a.toPrecision(2));
+  return '$0';
+}
+
+/** Rollup-cell variant: tiny-but-real amounts compact to "<$0.01" with the exact
+ *  figure in `title` for hover; everything else defers to fmtUsd. */
+export function fmtUsdCell(n) {
+  n = Number(n) || 0;
+  if (n > 0 && n < 0.01) return { text: '<$0.01', title: '$' + parseFloat(n.toPrecision(6)) };
+  return { text: fmtUsd(n), title: null };
 }
 
 export function fmtCompact(n) {

@@ -48,6 +48,14 @@
   const sTok = $derived(spark(buckets.map((b) => b.tokens)));
   const sSav = $derived(spark(buckets.map((b) => b.savings)));
 
+  // A sparkline earns its pixels only when there's a shape to show — at least two
+  // nonzero buckets. A lone busy bucket renders as the same right angle on every card,
+  // which reads as decoration, not data.
+  const trendable = (vals) => vals.filter((v) => v > 0).length >= 2;
+  const tReq = $derived(trendable(buckets.map((b) => b.requests)));
+  const tTok = $derived(trendable(buckets.map((b) => b.tokens)));
+  const tSav = $derived(trendable(buckets.map((b) => b.savings)));
+
   const trend = (pct) =>
     pct == null ? 'no earlier traffic to compare'
     : pct > 0 ? `up ${pct}% on ${prevLabel(range)}`
@@ -85,31 +93,43 @@
       </div>
       <div class="kpi">
         <div class="lab">Saved by routing</div>
-        <svg class="spark" viewBox="0 0 78 30" aria-hidden="true">
-          <path d={sSav.area} fill="var(--good)" opacity="0.10" />
-          <path d={sSav.line} fill="none" stroke="var(--good)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" />
-          <circle cx={sSav.last[0].toFixed(1)} cy={sSav.last[1].toFixed(1)} r="2.1" fill="var(--good)" />
-        </svg>
+        {#if tSav}
+          <svg class="spark" viewBox="0 0 78 30" aria-hidden="true">
+            <path d={sSav.area} fill="var(--good)" opacity="0.10" />
+            <path d={sSav.line} fill="none" stroke="var(--good)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" />
+            <circle cx={sSav.last[0].toFixed(1)} cy={sSav.last[1].toFixed(1)} r="2.1" fill="var(--good)" />
+          </svg>
+        {/if}
         <div class="big num bigrow saved">{usd(totals.savings)}{@render chip(dSaved)}</div>
-        <div class="sub"><span class="cheaper">{savingsPct}% cheaper</span>&nbsp;than frontier-only</div>
+        <div class="sub">
+          {#if totals.savings > 0 && savingsPct > 0}
+            <span class="cheaper">{savingsPct}% cheaper</span>&nbsp;than frontier-only
+          {:else}
+            {trend(dSaved)}
+          {/if}
+        </div>
       </div>
       <div class="kpi">
         <div class="lab">Requests</div>
-        <svg class="spark" viewBox="0 0 78 30" aria-hidden="true">
-          <path d={sReq.area} fill="var(--accent)" opacity="0.10" />
-          <path d={sReq.line} fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" />
-          <circle cx={sReq.last[0].toFixed(1)} cy={sReq.last[1].toFixed(1)} r="2.1" fill="var(--accent)" />
-        </svg>
+        {#if tReq}
+          <svg class="spark" viewBox="0 0 78 30" aria-hidden="true">
+            <path d={sReq.area} fill="var(--accent)" opacity="0.10" />
+            <path d={sReq.line} fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" />
+            <circle cx={sReq.last[0].toFixed(1)} cy={sReq.last[1].toFixed(1)} r="2.1" fill="var(--accent)" />
+          </svg>
+        {/if}
         <div class="big num bigrow">{req.big}<small>{req.unit}</small>{@render chip(dReq)}</div>
         <div class="sub">{trend(dReq)}</div>
       </div>
       <div class="kpi">
         <div class="lab">Tokens</div>
-        <svg class="spark" viewBox="0 0 78 30" aria-hidden="true">
-          <path d={sTok.area} fill="var(--accent)" opacity="0.10" />
-          <path d={sTok.line} fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" />
-          <circle cx={sTok.last[0].toFixed(1)} cy={sTok.last[1].toFixed(1)} r="2.1" fill="var(--accent)" />
-        </svg>
+        {#if tTok}
+          <svg class="spark" viewBox="0 0 78 30" aria-hidden="true">
+            <path d={sTok.area} fill="var(--accent)" opacity="0.10" />
+            <path d={sTok.line} fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" />
+            <circle cx={sTok.last[0].toFixed(1)} cy={sTok.last[1].toFixed(1)} r="2.1" fill="var(--accent)" />
+          </svg>
+        {/if}
         <div class="big num bigrow">{tok.big}<small>{tok.unit}</small>{@render chip(dTok)}</div>
         <div class="sub">prompt + completion</div>
       </div>

@@ -2,6 +2,7 @@
 // Recent Activity) — rune-free so node --test covers them (tests/overview-org.test.js).
 // Relative import (not $lib) so node --test can load this module without the SvelteKit alias.
 import { rankModels, score100, benchmarkModelLabel, catLabel, providerMark } from '../benchmarks.js';
+import { fmtUsd } from '../usage.js';
 
 export { providerMark };
 
@@ -13,10 +14,10 @@ export const prevRangeStartISO = (r, nowMs = Date.now()) =>
   new Date(nowMs - 2 * (RANGES[r] ?? RANGES['24h'])).toISOString();
 
 // ---- formatting (brief §4 common grammar) ------------------------------------------------------
-/** Whole dollars below $10k, "$12.4k" above. */
+/** "$12.4k" above $10k; below, fmtUsd's honest cents/sub-cent rendering. */
 export function usd(n) {
   n = +n || 0;
-  return n >= 10000 ? '$' + (n / 1000).toFixed(1) + 'k' : '$' + Math.round(n).toLocaleString('en-US');
+  return n >= 10000 ? '$' + (n / 1000).toFixed(1) + 'k' : fmtUsd(n);
 }
 
 /** Compact count: 1.2K / 3.40M / 1.01B. */

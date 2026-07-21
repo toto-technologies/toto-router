@@ -68,7 +68,7 @@
             {#if m.delta}<span class="delta {m.delta.dir}">{m.delta.label}</span>{/if}
             {#if m.provider}<span class="via">via {providerLabel(m.provider)}</span>{/if}
           {/if}
-          <span class="num stat">{compact(m.calls)} calls</span>
+          <span class="num stat">{compact(m.calls)} {m.calls === 1 ? 'call' : 'calls'}</span>
           <span class="num stat cost">{usd(m.cost)}</span>
           <span class="sharebar" aria-hidden="true"><i style="--w:{m.share / 100};animation-delay:{i * 40}ms"></i></span>
           <span class="num share">{m.share}%</span>

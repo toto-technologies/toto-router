@@ -10,6 +10,7 @@
   import { query } from '$lib/api/resource.svelte.js';
   import { getOrg, getMe, getUsage, logout, getMemberships, setActiveOrg } from '$lib/api/admin.js';
   import Login from '$lib/components/Login.svelte';
+  import { fmtUsd } from '$lib/usage.js';
 
   let { children } = $props();
 
@@ -69,8 +70,8 @@
     const parts = (s || '').replace(/@.*/, '').split(/[.\-_ ]/).filter(Boolean);
     return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase() || '—';
   }
-  // Whole dollars once it's real money; cents below $10 so small/early spend isn't hidden as "$0".
-  const money = (n) => (n > 0 && n < 10 ? '$' + n.toFixed(2) : '$' + Math.round(n).toLocaleString());
+  // Shared honest currency — sub-cent spend never hides as "$0" (see $lib/usage.js fmtUsd).
+  const money = fmtUsd;
 
   const active = (href) => page.url.pathname === href || page.url.pathname.startsWith(href + '/');
 

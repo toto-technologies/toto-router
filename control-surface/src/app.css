@@ -54,6 +54,9 @@
   --perimeter-soft:rgba(46,125,138,.12);
   --cloud:#6B4FD6;         /* residency: cloud */
   --cloud-soft:rgba(107,79,214,.11);
+  /* chart series — CVD-validated categorical order; no greens (residency/health signals) */
+  --series-1:#2a78d6; --series-2:#eb6834; --series-3:#4a3aa7;
+  --series-4:#e87ba4; --series-5:#eda100; --series-6:#0092c9;
   --shadow:0 1px 2px rgba(30,48,24,.05),0 10px 30px -16px rgba(30,48,24,.18);
   --sans:Inter,-apple-system,"Helvetica Neue",Helvetica,Arial,sans-serif; /* Inter — LOCKED (Alex v18 override, 2026-07-11; was Helvetica) */
   --mono:"Courier New",Courier,monospace;                                 /* Courier — LOCKED (Alex v18 override, 2026-07-11; was Menlo) */
@@ -78,6 +81,8 @@ html{font-size:calc(100% * var(--type-scale))}
     --good:#45C267; --good-soft:rgba(69,194,103,.14); --warn:#E0A23A; --warn-soft:rgba(224,162,58,.14);
     --crit:#F0616B; --crit-soft:rgba(240,97,107,.14);
     --perimeter:#63BBD0; --perimeter-soft:rgba(99,187,208,.15); --cloud:#A98BF0; --cloud-soft:rgba(169,139,240,.15);
+    --series-1:#3987e5; --series-2:#d95926; --series-3:#9085e9;
+    --series-4:#d55181; --series-5:#c98500; --series-6:#0092c9;
     --shadow:0 1px 0 rgba(220,234,219,.03) inset, 0 8px 30px -12px rgba(0,0,0,.6);
     color-scheme:dark;
   }
@@ -91,6 +96,8 @@ html{font-size:calc(100% * var(--type-scale))}
   --good:#1E9E4A; --good-soft:rgba(30,158,74,.12); --warn:#B47812; --warn-soft:rgba(180,120,18,.13);
   --crit:#D53742; --crit-soft:rgba(213,55,66,.11);
   --perimeter:#2E7D8A; --perimeter-soft:rgba(46,125,138,.12); --cloud:#6B4FD6; --cloud-soft:rgba(107,79,214,.11);
+  --series-1:#2a78d6; --series-2:#eb6834; --series-3:#4a3aa7;
+  --series-4:#e87ba4; --series-5:#eda100; --series-6:#0092c9;
   --shadow:0 1px 2px rgba(30,48,24,.05),0 10px 30px -16px rgba(30,48,24,.18);
   color-scheme:light;
 }
@@ -102,6 +109,8 @@ html{font-size:calc(100% * var(--type-scale))}
   --good:#45C267; --good-soft:rgba(69,194,103,.14); --warn:#E0A23A; --warn-soft:rgba(224,162,58,.14);
   --crit:#F0616B; --crit-soft:rgba(240,97,107,.14);
   --perimeter:#63BBD0; --perimeter-soft:rgba(99,187,208,.15); --cloud:#A98BF0; --cloud-soft:rgba(169,139,240,.15);
+  --series-1:#3987e5; --series-2:#d95926; --series-3:#9085e9;
+  --series-4:#d55181; --series-5:#c98500; --series-6:#0092c9;
   --shadow:0 1px 0 rgba(220,234,219,.03) inset, 0 8px 30px -12px rgba(0,0,0,.6);
   color-scheme:dark;
 }
