@@ -15,16 +15,26 @@
   import { revealIn } from '$lib/motion.js';
   import { METRICS, toStacks, toBreakdown, fmtUsd, fmtCompact } from '$lib/usage.js';
 
+  // Inlined edition check (not $lib/edition.js) so single-tenant branches fold at build time —
+  // vite.config.js `define`. OSS has no teams or per-user attribution: group by model/provider/task.
+  const OSS = typeof __EDITION__ !== 'undefined' && __EDITION__ === 'oss';
+
   const H = 210; // chart height, px (matches .stack in app.css)
 
   // ---- controls ----
-  const GROUPS = [
-    { value: 'team', label: 'By team' },
-    { value: 'model', label: 'By model' },
-    { value: 'provider', label: 'By provider' },
-    { value: 'label', label: 'By task' },
-    { value: 'user', label: 'By user' },
-  ];
+  const GROUPS = OSS
+    ? [
+        { value: 'model', label: 'By model' },
+        { value: 'provider', label: 'By provider' },
+        { value: 'label', label: 'By task' },
+      ]
+    : [
+        { value: 'team', label: 'By team' },
+        { value: 'model', label: 'By model' },
+        { value: 'provider', label: 'By provider' },
+        { value: 'label', label: 'By task' },
+        { value: 'user', label: 'By user' },
+      ];
   const METRIC_OPTS = [
     { value: 'cost', label: 'Cost' },
     { value: 'tokens', label: 'Tokens' },
@@ -38,7 +48,7 @@
   const pad = (n) => String(n).padStart(2, '0');
   const firstOf = (y, m) => `${y}-${pad(m)}-01`; // m is 1-based
   const now = new Date();
-  let groupBy = $state('team');
+  let groupBy = $state(OSS ? 'model' : 'team');
   let metric = $state('cost');
   let start = $state(firstOf(now.getFullYear(), now.getMonth() + 1));
   let end = $state(now.getMonth() === 11 ? firstOf(now.getFullYear() + 1, 1) : firstOf(now.getFullYear(), now.getMonth() + 2));
@@ -85,7 +95,7 @@
 <div class="pagehead">
   <div>
     <h1>Usage &amp; Billing</h1>
-    <div class="sub">Cost attribution across team · model · provider. <span class="num">~</span> marks partly-estimated rows.</div>
+    <div class="sub">{OSS ? 'Cost attribution across model · provider · task type.' : 'Cost attribution across team · model · provider.'} <span class="num">~</span> marks partly-estimated rows.</div>
   </div>
   <div class="right">
     <label class="selbox" style="gap:8px">Period
@@ -230,11 +240,11 @@
       <label>Line items · {ex.data.line_items.length}</label>
       <div class="tablewrap" style="border:1px solid var(--line);border-radius:8px;max-height:220px;overflow:auto">
         <table>
-          <thead><tr><th>Team</th><th>Model</th><th class="r">Tokens</th><th class="r">Cost</th></tr></thead>
+          <thead><tr>{#if !OSS}<th>Team</th>{/if}<th>Model</th><th class="r">Tokens</th><th class="r">Cost</th></tr></thead>
           <tbody>
             {#each ex.data.line_items as li}
               <tr>
-                <td class="n">{li.team_id ?? '—'}</td>
+                {#if !OSS}<td class="n">{li.team_id ?? '—'}</td>{/if}
                 <td class="modelid">{li.model}</td>
                 <td class="r n">{fmtCompact(li.quantity_tokens)}</td>
                 <td class="r n">{fmtUsd(li.cost_usd)}{#if li.estimated}<span class="est">~</span>{/if}</td>
