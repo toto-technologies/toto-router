@@ -8,8 +8,8 @@ OpenAI-compatible surface (`POST /v1/chat/completions`) **and** the Anthropic Me
 (`POST /v1/messages`, streaming + non-streaming) — so an OpenAI client and Claude Code can both
 route through the same gateway to the same catalog. On top of the raw passthrough sits an
 optional driver plane — an agent that decomposes a request into sub-tasks, routes each to the
-right model by task type, and synthesizes the answer — and a six-tab admin console (overview,
-activity, models, catalog, usage, settings).
+right model by task type, and synthesizes the answer — and a seven-tab admin console (overview,
+activity, models, catalog, caching, usage, settings).
 
 Routing intelligence is data-driven: a label routing table (`toto_gateway/routing/labels.yaml`)
 maps classifier-assigned task types to catalog models, and a policy layer
@@ -95,7 +95,7 @@ The admin console is a static SvelteKit app served by the gateway at `/console`:
 ```bash
 cd control-surface
 npm ci
-npm run build:oss     # the OSS build — six tabs, nothing else compiled in
+npm run build:oss     # the OSS build — seven tabs, nothing else compiled in
 ```
 
 Restart the gateway and open `http://127.0.0.1:8080/console`.

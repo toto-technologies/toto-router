@@ -1,7 +1,7 @@
 // The Control Surface categories, grouped like the a-forest mockup rail.
 // icon = raw <path>/<circle> inner SVG (24x24 viewBox), lifted from the mockup.
 //
-// Edition seam: the six OSS tabs are shared consts; __EDITION__ is a build-time literal
+// Edition seam: the OSS tabs are shared consts; __EDITION__ is a build-time literal
 // (see vite.config.js + $lib/edition.js), so the unused edition's group list below is dead
 // code the bundler drops — the OSS bundle carries no enterprise nav entries at all. The
 // check is inlined (not imported from edition.js) so it folds within this module.
@@ -10,13 +10,14 @@ const OVERVIEW = { href: '/overview', label: 'Overview', icon: '<path d="M4 13h6
 const ACTIVITY = { href: '/activity', label: 'Activity', icon: '<path d="M3 12h4l2 6 4-14 2 8h6"/>' };
 const MODELS = { href: '/models', label: 'Models', icon: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>' };
 const CATALOG = { href: '/catalog', label: 'Catalog & Routing', icon: '<path d="M4 6h16M4 12h16M4 18h10"/><circle cx="18" cy="18" r="2.4"/>' };
+const CACHING = { href: '/caching', label: 'Caching', icon: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>' };
 const USAGE = { href: '/usage', label: 'Usage & Billing', icon: '<path d="M4 19V5M4 19h16M8 16l3-4 3 2 4-6"/>' };
 const SETTINGS = { href: '/settings', label: 'Settings', icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>' };
 
 export const NAV_GROUPS = OSS
   ? [
       { label: 'Monitor', items: [OVERVIEW, ACTIVITY] },
-      { label: 'Policy', items: [MODELS, CATALOG] },
+      { label: 'Policy', items: [MODELS, CATALOG, CACHING] },
       { label: 'Telemetry', items: [USAGE] },
       { label: 'System', items: [SETTINGS] }
     ]
