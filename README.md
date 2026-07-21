@@ -16,11 +16,12 @@ maps classifier-assigned task types to catalog models, and a policy layer
 (`toto_gateway/routing/policy.yaml`) enforces hard privacy and context-window constraints.
 Model availability, pricing, and lanes live in `catalog.yaml`.
 
-Note: on a zero-key first boot the log prints `label routing disabled` — the shipped label
-table binds cloud models you haven't enabled yet. That's the honest state, not a crash:
-passthrough and the fake lane work regardless, and label routing switches on by itself once
-the bound models exist in your catalog (e.g. after adding an OpenRouter key, or after
-rebinding `labels.yaml` to models you run locally).
+Smart routing works out of the box with one env var: when `OPENROUTER_API_KEY` is set and
+`TOTO_GW_CATALOG` isn't, the gateway defaults to the bundled OpenRouter catalog
+(`catalog.openrouter.yaml`), whose models the shipped label table binds — task-type routing is
+live on first boot. With no key at all, the log prints a `smart task-type routing disabled`
+warning naming that env var; passthrough and the fake lane work regardless, and an explicit
+`TOTO_GW_CATALOG` always wins (rebind `labels.yaml` if you point it at models you run locally).
 
 ## Quickstart (10 seconds, zero secrets)
 

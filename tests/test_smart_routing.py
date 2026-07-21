@@ -250,6 +250,38 @@ async def test_org_default_policy_applies_to_team_member_bearer_traffic():
 
 
 @pytest.mark.asyncio
+async def test_org_default_custom_label_classifies_and_routes_over_http():
+    """The console's single-tenant path end-to-end: a custom task type saved on the ORG-DEFAULT
+    policy (the only scope the OSS console edits) must enter the classifier vocabulary for the
+    owner's teamless traffic, route to its bound model, and stamp the custom label on the
+    response envelope exactly like a builtin."""
+    gw, _ = _gw(label_reply='{"label": "invoice_parsing"}')
+    settings = default_settings(auth_token="", driver=False, fake_exec=False)
+    async with in_process_app(gateway=gw, settings=settings) as (client, app):
+        auth = app.state.auth
+        uid = await auth.create_user("owner@acme.com", None, email_verified=True)
+        org = (await auth.resolve_membership(uid))["org_id"]
+        await auth.set_routing_policy(org, org, custom_labels=[
+            {"name": "invoice_parsing", "desc": "extract fields from an invoice",
+             "model": "or-sonnet-4.6"}])
+        sess = await auth.create_session(uid, 3600)
+
+        resp = await client.post(
+            "/v1/chat/completions",
+            headers={"authorization": ""},
+            cookies={"toto_session": sess},
+            json={"model": "smart",
+                  "messages": [{"role": "user", "content": "pull the totals from this invoice"}]},
+        )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["model"] == "or-sonnet-4.6"
+    assert body["x_toto"]["classified_as"] == "invoice_parsing"
+    assert body["x_toto"]["route_reason"] == "label:invoice_parsing:team"
+
+
+@pytest.mark.asyncio
 async def test_oss_operator_console_binding_governs_operator_bearer():
     """OSS identity unification: the console is the operator, and a routing binding it saves (no
     org_id → the `local` sentinel scope) must govern the operator's OWN bearer traffic. The

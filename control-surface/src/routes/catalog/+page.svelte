@@ -394,13 +394,14 @@
     }
   }
 
-  // ---- Add custom task type (CT) modal -------------------------------------------------------
+  // ---- Add / edit custom task type (CT) modal ------------------------------------------------
   let addOpen = $state(false);
   let ctName = $state('');
   let ctDesc = $state('');
   let ctModel = $state('');
   let ctErr = $state(null); // {field?, message}
   let ctSaving = $state(false);
+  let ctEditing = $state(null); // name of the custom task type being edited (null = adding)
 
   // Backend 400 codes → which field the inline error hangs under.
   const CT_FIELD = {
@@ -412,30 +413,78 @@
   };
 
   function openAdd() {
+    ctEditing = null;
     ctName = '';
     ctDesc = '';
-    ctModel = allModelIds.find((id) => allowed.has(id)) ?? allModelIds[0] ?? '';
+    // Prefer a REAL allowed model — an echo/fake test entry is never a sensible binding default.
+    const pickable = allModelIds.filter((id) => allowed.has(id));
+    ctModel = pickable.find((id) => modelById.get(id)?.endpoint !== 'fake')
+      ?? pickable[0] ?? allModelIds[0] ?? '';
     ctErr = null;
     addOpen = true;
+  }
+  function openEdit(name) {
+    const c = customLabels.find((c) => c.name === name);
+    if (!c) return;
+    ctEditing = c.name;
+    ctName = c.name;
+    ctDesc = c.desc;
+    ctModel = routeSel[c.name] ?? c.model;
+    ctErr = null;
+    addOpen = true;
+  }
+  // Shared save for add / edit / remove: PUT the policy with `list` as the custom set, then
+  // reload so the re-seed reflects server truth (same contract the Add flow always had).
+  async function saveCustomList(list) {
+    const body = routingBody(list);
+    if (isOrg) {
+      await putOrgRoutingPolicy(body, orgId || undefined);
+      await routingQ.reload();
+    } else {
+      await putRoutingPolicy(teamId, body, orgId || undefined);
+      await Promise.all([routingQ.reload(), catalogQ.reload()]);
+    }
   }
   async function submitCustom() {
     ctSaving = true;
     ctErr = null;
     const entry = { name: ctName.trim(), desc: ctDesc.trim(), model: ctModel };
+    // The table dropdown may hold a stale pick for this name — the modal's choice wins
+    // (routingBody reads routeSel first for custom rows).
+    routeSel = { ...routeSel, [entry.name]: entry.model };
     try {
-      const body = routingBody([...customLabels, entry]);
-      if (isOrg) {
-        await putOrgRoutingPolicy(body, orgId || undefined);
-        await routingQ.reload();
-      } else {
-        await putRoutingPolicy(teamId, body, orgId || undefined);
-        await Promise.all([routingQ.reload(), catalogQ.reload()]); // re-seed picks up the new row
-      }
+      await saveCustomList(
+        ctEditing ? customLabels.map((c) => (c.name === ctEditing ? entry : c))
+                  : [...customLabels, entry]);
       addOpen = false;
     } catch (e) {
-      ctErr = { field: CT_FIELD[e?.code], message: e?.message ?? 'Could not add task type' };
+      ctErr = { field: CT_FIELD[e?.code], message: e?.message ?? 'Could not save task type' };
     } finally {
       ctSaving = false;
+    }
+  }
+
+  // Remove is two-click (arm, then confirm) and saves immediately, mirroring Add.
+  let removeArm = $state(null); // custom task-type name armed for removal
+  let removing = $state(null);
+  async function removeCustom(name) {
+    if (removeArm !== name) {
+      removeArm = name;
+      return;
+    }
+    removeArm = null;
+    removing = name;
+    // Drop the label's per-type hold too — the PUT rejects a stick_ttls key for a label the
+    // body no longer defines.
+    const holds = { ...stickSel };
+    delete holds[name];
+    stickSel = holds;
+    try {
+      await saveCustomList(customLabels.filter((c) => c.name !== name));
+    } catch (e) {
+      saveErr = e?.message ?? 'Could not remove task type';
+    } finally {
+      removing = null;
     }
   }
 
@@ -720,7 +769,20 @@
                   <td>
                     <div class="dfltcell">
                       {#if row.custom}
-                        <span class="chip ovr" title="Team-defined task type">team-defined</span>
+                        <div class="ctacts">
+                          <button class="btn small ghost" title="Edit this task type’s description or model"
+                            onclick={() => openEdit(row.label)}>Edit</button>
+                          <button
+                            class="btn small ghost danger"
+                            class:armed={removeArm === row.label}
+                            disabled={removing === row.label}
+                            title="Remove this task type"
+                            onblur={() => removeArm === row.label && (removeArm = null)}
+                            onclick={() => removeCustom(row.label)}
+                          >
+                            {removing === row.label ? 'Removing…' : removeArm === row.label ? 'Really remove?' : 'Remove'}
+                          </button>
+                        </div>
                       {:else}
                         <span class="dm">
                           default {prettyId(row.default_model)}{allowed.has(row.default_model) ? '' : ' · denied here'}
@@ -1088,12 +1150,23 @@
   {/if}
 {/if}
 
-<!-- ===== Add custom task type (CT) ===== -->
-<Modal bind:open={addOpen} title="Add task type" subtitle="Define a custom task type for the {teamName} team.">
+<!-- ===== Add / edit custom task type (CT) ===== -->
+<Modal
+  bind:open={addOpen}
+  title={ctEditing ? 'Edit task type' : 'Add task type'}
+  subtitle={ctEditing
+    ? `Change what “${ctEditing}” covers or which model it uses.`
+    : OSS
+      ? 'Define a custom task type for this gateway.'
+      : isOrg
+        ? 'Define a custom task type for this organization.'
+        : `Define a custom task type for the ${teamName} team.`}
+>
   <div class="field">
     <label for="ct-name">Name (slug)</label>
-    <input id="ct-name" bind:value={ctName} placeholder="invoice_parsing" spellcheck="false" />
+    <input id="ct-name" bind:value={ctName} placeholder="invoice_parsing" spellcheck="false" disabled={!!ctEditing} />
     {#if ctErr?.field === 'name'}<div class="fielderr">{ctErr.message}</div>{/if}
+    {#if ctEditing}<div class="fieldnote">The name is this task type’s identity — remove and re-add to rename.</div>{/if}
   </div>
   <div class="field">
     <label for="ct-desc">Description</label>
@@ -1114,7 +1187,7 @@
   {#snippet footer()}
     <button class="btn ghost" onclick={() => (addOpen = false)}>Cancel</button>
     <button class="btn primary" disabled={ctSaving || !ctName.trim() || !ctDesc.trim() || !ctModel} onclick={submitCustom}>
-      {ctSaving ? 'Adding…' : 'Add task type'}
+      {ctSaving ? 'Saving…' : ctEditing ? 'Save changes' : 'Add task type'}
     </button>
   {/snippet}
 </Modal>
@@ -1199,6 +1272,18 @@
     margin-top: 6px;
     font-size: 0.71875rem;
     color: var(--crit);
+  }
+  /* Custom task-type row actions (Default column — a custom type has no default to show). */
+  .ctacts {
+    display: flex;
+    gap: 6px;
+  }
+  .btn.danger {
+    color: var(--crit);
+  }
+  .btn.danger.armed {
+    border-color: var(--crit);
+    background: var(--crit-soft);
   }
   /* operator org picker (tuning-page pattern) */
   .orgform {
