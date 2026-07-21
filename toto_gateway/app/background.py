@@ -10,7 +10,6 @@ import time
 
 from fastapi import FastAPI
 
-from .. import pipedream
 from ..config import Settings
 from ..obs import _mb, peak_rss_bytes, rss_bytes
 
@@ -254,6 +253,7 @@ async def calsync_tick(store, settings: Settings, client) -> int:
 
     Pipedream is metered per real pull (pd-metering) and cached per user within the tick so N
     calendars owned by one user cost one accounts-lookup + one events-pull, not N of each."""
+    from .. import pipedream  # app-plane calendar connector; imported here so the OSS export can drop it
     from ..ics import merge_events, parse_ics
 
     clog = logging.getLogger("toto_gateway.calsync")

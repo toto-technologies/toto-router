@@ -118,7 +118,5 @@ multi-person, that's the line: contact the maintainers or use the hosted offerin
 
 ## License
 
-[FSL-1.1-ALv2](LICENSE) (Functional Source License). In short: use it freely — internally,
-commercially, modified or not — for anything except offering it (or a substantially similar
-service) to others as a competing product. Each release automatically converts to
-Apache-2.0 two years after it ships. See the LICENSE file for the exact terms.
+[MIT](LICENSE). Use it freely — internally, commercially, modified or not. See the LICENSE
+file for the exact terms.

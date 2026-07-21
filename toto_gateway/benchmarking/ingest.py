@@ -21,7 +21,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from . import connectors as C
 from .store import BenchmarkStore
 
 _ALL_SOURCES = ("openrouter", "epoch", "lmarena", "bfcl", "artificial_analysis")
@@ -139,6 +138,11 @@ async def refresh(store: BenchmarkStore, sources: list[str] | None = None,
     """Fetch → alias-map → upsert every requested source, isolated. Returns
     {source: {facts, aliases, status, error?, skipped?}}."""
     import httpx
+
+    # The external benchmark-provider fetchers reach upstream over the observability http helper —
+    # imported here, not at module top, so the pure mapping helpers (norm/map_model) stay importable
+    # without pulling that plane, and the refresh path is the only place that needs it.
+    from . import connectors as C
 
     sources = list(sources) if sources else list(_ALL_SOURCES)
     report: dict[str, dict] = {}

@@ -4,7 +4,7 @@ version = "0.2.0"
 description = "OpenAI-compatible LLM gateway with a routing brain and full per-request provenance."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "FSL-1.1-ALv2" }
+license = { text = "MIT" }
 authors = [{ name = "Toto" }]
 
 # Dependency discipline (context doc §9, §14.8): a routing-adjacent tool (LiteLLM)

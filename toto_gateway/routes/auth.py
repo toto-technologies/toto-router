@@ -13,7 +13,7 @@ import sqlite3
 import time
 from collections import defaultdict, deque
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
@@ -190,11 +190,20 @@ def _sso_error(next_path: str, reason: str) -> RedirectResponse:
     return RedirectResponse(f"{next_path}{sep}sso_error={reason}", status_code=302)
 
 
+def _require_sso_edition(request: Request) -> None:
+    """SSO login is enterprise-only; the oss edition ships email/password auth and 404s these two
+    endpoints — same plain-404 posture as the excluded enterprise routes, and it lets the export
+    drop the oidc module wholesale."""
+    if request.app.state.settings.edition.strip().lower() == "oss":
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
 @router.get("/v1/auth/sso/start")
 async def sso_start(request: Request, email: str = "", next: str = ""):
     """Resolve the caller's org by email domain and redirect to its IdP (authorization-code + PKCE).
     Unknown domain / SSO not configured → bounce to login with sso_error=no_sso (the domain's SSO
     posture is public, so this reveals nothing about any account)."""
+    _require_sso_edition(request)
     from .. import oidc
 
     next_path = _safe_next(next)
@@ -225,6 +234,7 @@ async def sso_callback(request: Request, code: str = "", state: str = "", error:
     PKCE verifier), verify the ID token (signature/iss/aud/exp/nonce), enforce email_verified + that
     the email's domain belongs to this org, JIT-provision, and issue a session — identical to password
     login. Every failure bounces to login with a generic sso_error code."""
+    _require_sso_edition(request)
     from .. import oidc
     from ..credentials import credentials_secret, credentials_secret_old, decrypt
 

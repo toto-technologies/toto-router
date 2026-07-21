@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from .. import __version__, pipedream
+from .. import __version__
 from ..config import Settings, get_settings
 from ..gateway import Gateway
 from ..obs import RequestContextMiddleware, init_sentry, redact_settings
@@ -20,7 +20,7 @@ from ..obs import RequestContextMiddleware, init_sentry, redact_settings
 from ..routes import (
     admin_analytics, admin_catalog, admin_catalog_adoptions, admin_catalog_sync, admin_labeling,
     admin_latency, admin_providers, admin_requests, admin_routing, admin_usage, auth, chat,
-    credentials, custom_tools, health, messages, metrics, models, prewarm, route, routing,
+    credentials, health, messages, metrics, models, prewarm, route, routing,
     sessions, tokens,
 )
 from .background import (
@@ -53,7 +53,7 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
         from ..driver import prompts
 
         prompts.load_overrides_file(settings.prompts_file)
-    if settings.scopes_file:  # tool-scope overrides — same seam, so /v1/dev/tools/scopes reads truth
+    if settings.scopes_file and not oss:  # tool-scope overrides for the custom-tools plane (dropped in oss)
         from .. import tool_scopes
 
         tool_scopes.load_scope_overrides_file(settings.scopes_file)
@@ -97,29 +97,37 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
 
         bg = [asyncio.create_task(_memory_watermark(settings)),
               asyncio.create_task(_reaper(app, settings))]
-        if runs is not None:
-            # Note-body backfill runs in the BACKGROUND: pre-yield it would full-table-scan
-            # canvas_objects at boot, holding /readyz at 503 past the Docker start-period and
-            # failing healthcheck-gated rollouts on large/slow tables. It's idempotent and a
-            # no-op once clean (EXISTS short-circuit inside), so serving never waits on it.
-            bg.append(asyncio.create_task(_backfill_notes(app)))
-        if runs is not None and settings.memory and settings.memory_dreams:
-            bg.append(asyncio.create_task(_dreamer(app, settings)))
-        if runs is not None and (settings.cal_sync or pipedream.enabled(settings)):
-            bg.append(asyncio.create_task(_calsync(app, settings)))
-        if runs is not None and getattr(app.state, "content", None) is not None \
-                and app.state.content.indexer is not None:
-            # Boot embedding backfill in the background (never blocks serving). Idempotent and a
-            # no-op once indexed; only runs when the memory plane is on (indexer present).
-            bg.append(asyncio.create_task(_backfill_embeddings(app)))
         if settings.benchmark_refresh_hours > 0:
             bg.append(asyncio.create_task(_benchmark_refresher(app, settings)))
         if settings.inventory_refresh_hours > 0:
             bg.append(asyncio.create_task(_inventory_refresher(app, settings)))
-        if getattr(app.state, "auth", None) is not None and settings.audit_export_tick_seconds > 0:
-            bg.append(asyncio.create_task(_audit_exporter(app, settings)))
-        if getattr(app.state, "auth", None) is not None and settings.retention_sweep_tick_seconds > 0:
-            bg.append(asyncio.create_task(_retention_sweeper(app, settings)))
+        # App/enterprise background loops. Each rides a module the OSS export drops — note/embedding
+        # backfills and the dreamer on the content/recall plane, calendar sync on pipedream/ics,
+        # audit export, content retention — so they spawn only outside the oss edition. This branch
+        # is a no-op for every existing deploy (oss is False there); pipedream is imported inside it
+        # so nothing here references a dropped module at import time.
+        if not oss:
+            from .. import pipedream
+
+            if runs is not None:
+                # Note-body backfill runs in the BACKGROUND: pre-yield it would full-table-scan
+                # canvas_objects at boot, holding /readyz at 503 past the Docker start-period and
+                # failing healthcheck-gated rollouts on large/slow tables. It's idempotent and a
+                # no-op once clean (EXISTS short-circuit inside), so serving never waits on it.
+                bg.append(asyncio.create_task(_backfill_notes(app)))
+            if runs is not None and settings.memory and settings.memory_dreams:
+                bg.append(asyncio.create_task(_dreamer(app, settings)))
+            if runs is not None and (settings.cal_sync or pipedream.enabled(settings)):
+                bg.append(asyncio.create_task(_calsync(app, settings)))
+            if runs is not None and getattr(app.state, "content", None) is not None \
+                    and app.state.content.indexer is not None:
+                # Boot embedding backfill in the background (never blocks serving). Idempotent and a
+                # no-op once indexed; only runs when the memory plane is on (indexer present).
+                bg.append(asyncio.create_task(_backfill_embeddings(app)))
+            if getattr(app.state, "auth", None) is not None and settings.audit_export_tick_seconds > 0:
+                bg.append(asyncio.create_task(_audit_exporter(app, settings)))
+            if getattr(app.state, "auth", None) is not None and settings.retention_sweep_tick_seconds > 0:
+                bg.append(asyncio.create_task(_retention_sweeper(app, settings)))
         # Egress allowlist: derive the allowed host set from config + configured SSO issuers,
         # then patch the httpx transport chokepoint. Best-effort — an install failure never blocks boot.
         try:
@@ -232,9 +240,15 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
     app.state.started_at = time.time()  # for /statusz uptime_s
     # Distribution license: verify TOTO_GW_LICENSE_KEY once at boot; the gate middleware + /statusz +
     # /healthz read the resulting status. Unlicensed dev (no key, not required) is a no-op.
-    from .. import license as _license
+    if oss:
+        # No distribution-license plane in the open edition (license.py isn't shipped). All three
+        # readers — the gate middleware above, /statusz, /healthz — already treat a None status as
+        # "unlicensed / gate skipped", identical to what evaluate() returns for a keyless deploy.
+        app.state.license_status = None
+    else:
+        from .. import license as _license
 
-    app.state.license_status = _license.evaluate(settings)
+        app.state.license_status = _license.evaluate(settings)
     # Wire the live USE gauges to the counts already tracked elsewhere (fail-open at collect time).
     from ..metrics import METRICS
 
@@ -299,52 +313,66 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
         # enterprise default — one Postgres, two schemas), else SQLite (dev only). HARD RULE: a
         # set DATABASE_URL never silently falls back to ephemeral SQLite. Ephemeral primary
         # (tests, :memory:) → ephemeral content plane, no scattered file.
-        from ..content import ContentIndexer, ContentResolver
+        #
+        # The content/recall plane, memory extraction, and the companion below are the app/enterprise
+        # product built on the router — their modules (content, memory, memory_extract, companion) are
+        # dropped by the OSS export, so the whole block is edition-gated. Enterprise (default edition,
+        # oss False) wires exactly what it always did; the oss branch leaves the attrs None, which the
+        # shared readers already guard for (getattr(driver, "memory", None), app.state.content).
+        if not oss:
+            from ..content import ContentIndexer, ContentResolver
 
-        if settings.content_database_url:
-            _c_url, _c_schema, _c_path = settings.content_database_url, None, ""
-        elif settings.database_url:
-            _c_url, _c_schema, _c_path = settings.database_url, settings.content_schema, ""
-        else:
-            _c_url, _c_schema = "", None
-            _c_path = settings.content_db if settings.db != ":memory:" else ":memory:"
-        # The embed-on-write indexer is the ONE seam: every content put/delete embeds into
-        # doc_embeddings from inside ContentStore — no per-route index code. Built only when the
-        # memory plane is on (TOTO_GW_MEMORY=1), else None → mirroring is a silent no-op. It
-        # reuses the driver's embedder (same OpenRouter path as routing).
-        app.state.content = ContentResolver(_c_path, _c_url, schema=_c_schema, pool=pool_cfg)
-        if settings.memory:
-            _embedder = getattr(app.state.driver, "_embedder", None)  # reuse the routing embedder
-            app.state.content.indexer = ContentIndexer(app.state.content, _embedder)
-            # The RECALL plane: a thin adapter over the content plane. None when the flag is off →
-            # the companion degrades to declared-memory-only. Attached to the driver too so the
-            # session-completion capture hook (routes/sessions) can reach it.
-            from ..memory import build_memory
+            if settings.content_database_url:
+                _c_url, _c_schema, _c_path = settings.content_database_url, None, ""
+            elif settings.database_url:
+                _c_url, _c_schema, _c_path = settings.database_url, settings.content_schema, ""
+            else:
+                _c_url, _c_schema = "", None
+                _c_path = settings.content_db if settings.db != ":memory:" else ":memory:"
+            # The embed-on-write indexer is the ONE seam: every content put/delete embeds into
+            # doc_embeddings from inside ContentStore — no per-route index code. Built only when the
+            # memory plane is on (TOTO_GW_MEMORY=1), else None → mirroring is a silent no-op. It
+            # reuses the driver's embedder (same OpenRouter path as routing).
+            app.state.content = ContentResolver(_c_path, _c_url, schema=_c_schema, pool=pool_cfg)
+            if settings.memory:
+                _embedder = getattr(app.state.driver, "_embedder", None)  # reuse the routing embedder
+                app.state.content.indexer = ContentIndexer(app.state.content, _embedder)
+                # The RECALL plane: a thin adapter over the content plane. None when the flag is off →
+                # the companion degrades to declared-memory-only. Attached to the driver too so the
+                # session-completion capture hook (routes/sessions) can reach it.
+                from ..memory import build_memory
 
-            # rerank runs on OUR gateway via the driver's own complete seam (retry/fallback/trace,
-            # cost in our metering) — the economy model, one batched call, degrade-to-fused-order.
-            app.state.memory = build_memory(settings, app.state.content, _embedder,
-                                            llm_fn=app.state.driver._llm)
+                # rerank runs on OUR gateway via the driver's own complete seam (retry/fallback/trace,
+                # cost in our metering) — the economy model, one batched call, degrade-to-fused-order.
+                app.state.memory = build_memory(settings, app.state.content, _embedder,
+                                                llm_fn=app.state.driver._llm)
+            else:
+                app.state.memory = None
+            app.state.driver.memory = app.state.memory
+            # Post-capture distiller: turns raw captures into durable typed facts in user_memory.
+            # Present == enabled; attached to BOTH capture sites (companion chat + session outcome).
+            # Needs the recall plane on (the dedupe consults it).
+            if settings.memory and settings.memory_extract:
+                from ..memory_extract import MemoryExtractor
+
+                app.state.extractor = MemoryExtractor(
+                    gateway=gateway, runs=app.state.runs, memory=app.state.memory,
+                    model=settings.memory_extract_model or settings.triage_model,
+                    every=settings.memory_extract_every, dedupe_sim=settings.memory_extract_dedupe_sim,
+                    daily_usd=settings.memory_extract_daily_usd)
+            else:
+                app.state.extractor = None
+            app.state.driver.extractor = app.state.extractor  # session-outcome capture site reaches it
         else:
+            app.state.content = None
             app.state.memory = None
-        app.state.driver.memory = app.state.memory
-        # Post-capture distiller: turns raw captures into durable typed facts in user_memory.
-        # Present == enabled; attached to BOTH capture sites (companion chat + session outcome).
-        # Needs the recall plane on (the dedupe consults it).
-        if settings.memory and settings.memory_extract:
-            from ..memory_extract import MemoryExtractor
-
-            app.state.extractor = MemoryExtractor(
-                gateway=gateway, runs=app.state.runs, memory=app.state.memory,
-                model=settings.memory_extract_model or settings.triage_model,
-                every=settings.memory_extract_every, dedupe_sim=settings.memory_extract_dedupe_sim,
-                daily_usd=settings.memory_extract_daily_usd)
-        else:
             app.state.extractor = None
-        app.state.driver.extractor = app.state.extractor  # session-outcome capture site reaches it
+            app.state.driver.memory = None
+            app.state.driver.extractor = None
         # The companion rides the driver plane AND the app plane: it exists only when the app
         # plane is mounted (and never in the OSS edition — companion/ is absent from that tree).
         if app_plane:
+            from .. import pipedream
             from ..companion.core import Companion
             from ..routes.admin_benchmarks import _get_store
 
@@ -382,14 +410,15 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
     # --- Plane gating ---------------------------------------------------------------------------
     # Data-driven map of plane → routers; TOTO_GW_PLANES selects which mount (default: both).
     #   gateway (always on) — the pure API/gateway (chat/models), the driver (route/routing/
-    #     sessions), and gateway features (credentials = BYOK, custom_tools = the tool contract).
+    #     sessions), and gateway features (credentials = BYOK).
     #   app (only when "app" in planes) — the Toto product surface: companion, canvas, tasks,
     #     objects, bindles, calendar, integrations + the SPA static mount below.
-    # Ambiguous routers default to the app plane (keep the gateway minimal); sessions/credentials/
-    # custom_tools sit in gateway.
+    # Ambiguous routers default to the app plane (keep the gateway minimal); sessions/credentials
+    # sit in gateway. custom_tools (the tool contract) mounts in the not-oss block below — its
+    # executor lives on the excluded companion plane, so the open edition drops it.
     plane_routers = {
         "gateway": [health, metrics, auth, tokens, models, chat, messages, prewarm, route, routing,
-                    sessions, credentials, custom_tools,
+                    sessions, credentials,
                     admin_analytics, admin_catalog, admin_catalog_adoptions, admin_catalog_sync,
                     admin_labeling, admin_latency, admin_providers, admin_requests, admin_routing,
                     admin_usage],
@@ -415,14 +444,15 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
         from ..routes import (
             admin_audit, admin_audit_export, admin_benchmark_platform, admin_benchmarks,
             admin_budgets, admin_egress, admin_license, admin_observability, admin_sso,
-            admin_storage, admin_tenancy, admin_tokens, admin_tuning, admin_workmap,
+            admin_storage, admin_tenancy, admin_tokens, admin_tuning, admin_workmap, custom_tools,
             org_credentials, scim,
         )
 
         plane_routers["gateway"] += [
-            scim, org_credentials, admin_audit, admin_audit_export, admin_benchmark_platform,
-            admin_benchmarks, admin_budgets, admin_egress, admin_license, admin_observability,
-            admin_sso, admin_storage, admin_tenancy, admin_tokens, admin_tuning, admin_workmap,
+            custom_tools, scim, org_credentials, admin_audit, admin_audit_export,
+            admin_benchmark_platform, admin_benchmarks, admin_budgets, admin_egress, admin_license,
+            admin_observability, admin_sso, admin_storage, admin_tenancy, admin_tokens, admin_tuning,
+            admin_workmap,
         ]
     active_planes = settings.plane_set
     log.info("planes active: %s", ",".join(sorted(active_planes)))
