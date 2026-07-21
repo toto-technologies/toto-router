@@ -45,8 +45,17 @@ token you set) to route a real harness through the gateway.
 
 ## Enabling real lanes (bring your own keys)
 
-Models in `catalog.yaml` marked `lane: fake` never touch the network. To enable real
-upstreams, set the provider key env vars the catalog entries name:
+Models in `catalog.yaml` marked `lane: fake` never touch the network. The easiest way to enable
+real upstreams is the console's Settings page: paste your OpenRouter / Fireworks / Cloudflare /
+OpenAI / Gemini key and it's used on the very next request — no env vars, no restart. Keys are
+encrypted at rest (the at-rest secret is auto-generated beside the SQLite DB on first boot; set
+`TOTO_GW_CREDENTIALS_SECRET` to keep it off the DB's disk — with the generated file, a stolen DB
+file alone stays unreadable, but a full-disk copy includes the secret). A stored key wins over
+its env var; the env var is the fallback. Two things resolve at boot rather than live: the
+default-catalog pick above (a stored OpenRouter key counts from the next boot) and
+provider-inventory discovery.
+
+Alternatively, set the provider key env vars the catalog entries name:
 
 | Lane | Catalog `endpoint` | Env var |
 |------|--------------------|---------|

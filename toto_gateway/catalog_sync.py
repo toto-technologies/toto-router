@@ -19,6 +19,7 @@ from typing import Any
 import httpx
 
 from .catalog import CatalogEntry
+from .credentials import byok_keys, expand_env_refs
 from .routes.models import _provider_of
 
 API = "https://api.fireworks.ai/v1"
@@ -420,7 +421,9 @@ async def probe_availability(entries: list[CatalogEntry]) -> dict[str, Any]:
     for e in entries:
         if e.endpoint != "openai" or not e.base_url:
             continue
-        key = os.environ.get(e.api_key_env)
+        # Stored key first (request-scoped byok overlay — a key pasted in Settings counts as
+        # configured), env fallback: the same precedence dispatch uses.
+        key = byok_keys.get().get(e.api_key_env) or os.environ.get(e.api_key_env)
         if key:
             providers.setdefault(e.base_url, key)
 
@@ -429,9 +432,10 @@ async def probe_availability(entries: list[CatalogEntry]) -> dict[str, Any]:
     async def _one(base_url: str, key: str) -> tuple[str, list[str] | None, str | None]:
         try:
             async with httpx.AsyncClient(timeout=30) as client:
-                # Expand ${ENV} in the URL (Cloudflare embeds the account id) before the live GET;
-                # the returned key stays the raw base_url so declared/live reconcile by the same key.
-                target = os.path.expandvars(base_url)
+                # Expand ${ENV} in the URL (Cloudflare embeds the account id) before the live GET —
+                # stored credentials first, env fallback (expand_env_refs); the returned key stays
+                # the raw base_url so declared/live reconcile by the same key.
+                target = expand_env_refs(base_url)
                 return base_url, await fetch_provider_models(client, target, key), None
         except httpx.HTTPError as e:
             return base_url, None, f"{type(e).__name__}: {e}"

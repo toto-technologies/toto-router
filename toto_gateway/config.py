@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import model_validator
+from pydantic import PrivateAttr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="TOTO_GW_", env_file=".env", extra="ignore")
+
+    # True iff `catalog` was left empty and _default_catalog picked it. An explicit TOTO_GW_CATALOG
+    # is never second-guessed; only a defaulted pick may be upgraded at boot when a stored
+    # OpenRouter key exists (app.factory).
+    _catalog_defaulted: bool = PrivateAttr(default=False)
 
     # Server
     host: str = "127.0.0.1"
@@ -583,6 +588,7 @@ class Settings(BaseSettings):
 
             self.catalog = ("catalog.openrouter.yaml" if os.environ.get("OPENROUTER_API_KEY")
                             else "catalog.yaml")
+            self._catalog_defaulted = True
         return self
 
     def provider_timeout(self, *, local: bool = False):

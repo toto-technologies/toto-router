@@ -208,7 +208,7 @@ def test_route_put_get_delete_never_leaks_raw_key():
         r = client.get("/v1/credentials")
         assert r.status_code == 200, r.text
         creds = {c["provider"]: c for c in r.json()["credentials"]}
-        assert set(creds) == {"openrouter", "fireworks"}
+        assert set(creds) == {"openrouter", "fireworks", "cloudflare", "openai", "gemini"}
         assert creds["openrouter"]["configured"] is False
         assert creds["openrouter"]["last4"] is None
         assert creds["fireworks"]["powers"]  # one-line description present

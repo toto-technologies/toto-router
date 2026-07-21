@@ -20,7 +20,7 @@ from ..obs import RequestContextMiddleware, init_sentry, redact_settings
 from ..routes import (
     admin_catalog, admin_catalog_adoptions, admin_catalog_sync, admin_providers, admin_requests,
     admin_routing, admin_usage, auth, chat, credentials, health, messages, metrics, models,
-    prewarm, route, routing, sessions, tokens,
+    prewarm, provider_keys, route, routing, sessions, tokens,
 )
 from .background import (
     _audit_exporter, _backfill_embeddings, _backfill_notes, _benchmark_refresher, _calsync,
@@ -40,6 +40,23 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
     oss = settings.edition.strip().lower() == "oss"
     app_plane = "app" in settings.plane_set and not oss
     init_sentry(settings)  # no-op unless TOTO_GW_SENTRY_DSN is set
+    if oss:
+        # Zero-config single-tenant boot, resolved BEFORE build_gateway so both seams see truth:
+        #  - at-rest secret: none configured → generate one and persist it beside the SQLite DB, so
+        #    pasting a provider key in Settings works with zero env vars (tradeoff documented on
+        #    bootstrap_local_secret). Stored keys themselves are LIVE at dispatch per request.
+        #  - default catalog: a stored OpenRouter key counts as configured, so a DEFAULTED catalog
+        #    pick upgrades to catalog.openrouter.yaml — this one takes effect at boot, not live,
+        #    because the catalog is built once here. An explicit TOTO_GW_CATALOG is never touched.
+        from ..credentials import bootstrap_local_secret, stored_org_key_providers
+        from ..routes.deps import OSS_LOCAL_ORG
+
+        if settings.kms_provider == "env" and not settings.credentials_secret:
+            settings.credentials_secret = bootstrap_local_secret(settings)
+        if settings._catalog_defaulted and settings.catalog == "catalog.yaml" \
+                and "openrouter" in stored_org_key_providers(settings, OSS_LOCAL_ORG):
+            settings.catalog = "catalog.openrouter.yaml"
+            log.info("stored openrouter key found — defaulting catalog to catalog.openrouter.yaml")
     if settings.kms_provider != "env":
         # Fail-closed at startup: resolve the at-rest key material NOW so a vault-unreachable /
         # missing-key deploy crashes on boot instead of 500ing writes later. env mode skips this
@@ -417,7 +434,7 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
     # executor lives on the excluded companion plane, so the open edition drops it.
     plane_routers = {
         "gateway": [health, metrics, auth, tokens, models, chat, messages, prewarm, route, routing,
-                    sessions, credentials,
+                    sessions, credentials, provider_keys,
                     admin_catalog, admin_catalog_adoptions, admin_catalog_sync,
                     admin_providers, admin_requests, admin_routing, admin_usage],
     }
