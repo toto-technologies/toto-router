@@ -168,6 +168,7 @@ export function syncFreshness(s) {
 export function vendorFromSlug(slug) {
   const s = String(slug ?? '');
   if (s.startsWith('accounts/')) return (lastSeg(s).match(/^[a-z]+/i)?.[0] ?? '').toLowerCase();
+  if (s.startsWith('@cf/')) return (s.split('/')[1] ?? '').toLowerCase(); // @cf/meta/llama → 'meta'
   return s.split('/')[0].toLowerCase();
 }
 
@@ -206,6 +207,23 @@ export function orYaml(m, id) {
     `  price_usd_per_1k: { prompt: ${m.price_in ?? 0}, completion: ${m.price_out ?? 0} }`,
     `  context_window: ${m.context_window ?? 0}`,
     `  upstream_model: ${m.slug}`,
+  ].join('\n');
+}
+
+/** Paste-ready catalog.cloudflare.yaml entry — exact field shape of the real fragment. base_url keeps
+ *  the ${CLOUDFLARE_ACCOUNT_ID} template (the runner expands it); Cloudflare's models API exposes no
+ *  per-token price, so the entry ships zeros with a fix-me comment. */
+export function cfYaml(m, id) {
+  return [
+    `- id: ${id}`,
+    `  lane: economy`,
+    `  endpoint: openai`,
+    `  base_url: https://api.cloudflare.com/client/v4/accounts/\${CLOUDFLARE_ACCOUNT_ID}/ai/v1`,
+    `  api_key_env: CLOUDFLARE_API_TOKEN`,
+    `  residency_class: cloud`,
+    `  price_usd_per_1k: { prompt: 0.0, completion: 0.0 } # set the real per-token price (Cloudflare's models API has none)`,
+    `  context_window: ${m.context_window ?? 0}`,
+    `  upstream_model: "${m.slug}"`,
   ].join('\n');
 }
 
@@ -256,6 +274,14 @@ export const FW_DISCOVERY_FILTERS = [
   { key: 'vision', label: 'Vision' },
   { key: 'bigctx', label: '128k+ context' },
 ];
+// Cloudflare exposes tools/vision/context but no per-token price → same chips as OpenRouter minus 'cheap'.
+export const CF_DISCOVERY_FILTERS = [
+  { key: 'cataloged', label: 'In catalog' },
+  { key: 'not_cataloged', label: 'Not cataloged' },
+  { key: 'tools', label: 'Tools' },
+  { key: 'vision', label: 'Vision' },
+  { key: 'bigctx', label: '128k+ context' },
+];
 const FILTER_PRED = {
   cataloged: (m) => !!m.cataloged,
   not_cataloged: (m) => !m.cataloged,
@@ -301,9 +327,10 @@ export const routedTasks = (catalogId, routing) =>
 // ---- /models page joins ---------------------------------------------------------------------
 
 /** Tag discovery models with their source and concatenate — the Library's "All sources" list. */
-export const mergeDiscovery = (orModels, fwModels) => [
+export const mergeDiscovery = (orModels, fwModels, cfModels) => [
   ...(orModels ?? []).map((m) => ({ ...m, source: 'openrouter' })),
   ...(fwModels ?? []).map((m) => ({ ...m, source: 'fireworks' })),
+  ...(cfModels ?? []).map((m) => ({ ...m, source: 'cloudflare' })),
 ];
 
 /** Union of both sources' filter chips (OpenRouter order first) — the "All sources" chip row.

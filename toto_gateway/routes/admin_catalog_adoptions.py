@@ -28,7 +28,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 
 from ..catalog import LEGACY_MODEL_IDS, CatalogEntry, Price, effective_catalog, id_tier_words
-from ..catalog_sync import fetch_fireworks_library, fetch_openrouter
+from ..catalog_sync import fetch_cloudflare_library, fetch_fireworks_library, fetch_openrouter
 from .admin_catalog import _model_row
 from .admin_usage import _scope_org
 from .deps import Identity, require_read_role, require_role
@@ -47,6 +47,14 @@ _PROVIDERS = {
     "fireworks": {
         "prefix": "fw", "base_url": "https://api.fireworks.ai/inference/v1",
         "api_key_env": "FIREWORKS_API_KEY", "key_required": True,
+    },
+    "cloudflare": {
+        # base_url mirrors catalog.cloudflare.yaml — the ${CLOUDFLARE_ACCOUNT_ID} template is
+        # expanded by the runner (CatalogEntry.resolved_base_url), so an adopted CF entry dispatches
+        # through the same path as a shipped one. The account id is a SECOND env var (not the key).
+        "prefix": "cf",
+        "base_url": "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1",
+        "api_key_env": "CLOUDFLARE_API_TOKEN", "key_required": True,
     },
 }
 
@@ -87,8 +95,15 @@ async def _discovery_row(source: str, slug: str) -> tuple[dict | None, JSONRespo
     key = os.environ.get(cfg["api_key_env"])
     if cfg["key_required"] and not key:
         return None, _error(503, f"{cfg['api_key_env']} not configured", "config_error")
-    fetched = (await fetch_fireworks_library(key) if source == "fireworks"
-               else await fetch_openrouter(key))
+    if source == "fireworks":
+        fetched = await fetch_fireworks_library(key)
+    elif source == "cloudflare":
+        account = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
+        if not account:
+            return None, _error(503, "CLOUDFLARE_ACCOUNT_ID not configured", "config_error")
+        fetched = await fetch_cloudflare_library(key, account)
+    else:
+        fetched = await fetch_openrouter(key)
     if fetched["error"]:
         return None, _error(502, fetched["error"], "provider_error")
     row = next((m for m in fetched["models"] if m["slug"] == slug), None)

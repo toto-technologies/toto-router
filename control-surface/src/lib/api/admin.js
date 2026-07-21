@@ -225,6 +225,12 @@ export const getOpenRouterDiscovery = () => get('/v1/admin/catalog/discovery/ope
  *  @returns {Promise<import('./types').FireworksDiscovery>} */
 export const getFireworksDiscovery = () => get('/v1/admin/catalog/discovery/fireworks');
 
+/** The Cloudflare Workers AI text-generation catalog, reconciled against the catalog. Always 200;
+ *  key_present:false when CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID (the two-part credential)
+ *  aren't both set.
+ *  @returns {Promise<import('./types').FireworksDiscovery>} */
+export const getCloudflareDiscovery = () => get('/v1/admin/catalog/discovery/cloudflare');
+
 // ---- Catalog adoptions (one-click Add to Catalog, scoped to the caller's org) -----------------
 
 /** Adopt an upstream model into the caller's catalog — the server derives the id and all facts

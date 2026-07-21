@@ -52,6 +52,16 @@
         <div class="v">{m.tunable ? 'Tunable · LoRA' : '—'}</div>
         <div class="l">fine-tuning</div>
       </div>
+    {:else if source === 'cloudflare'}
+      <!-- Cloudflare's models API exposes no per-token price — context + tool capability instead -->
+      <div class="stat">
+        <div class="v n">{ctxShort(m.context_window)}</div>
+        <div class="l">context</div>
+      </div>
+      <div class="stat">
+        <div class="v">{m.tools ? 'Function calling' : '—'}</div>
+        <div class="l">tools</div>
+      </div>
     {:else}
       <div class="stat">
         <div class="v n">{perM(m.price_in)} · {perM(m.price_out)}</div>

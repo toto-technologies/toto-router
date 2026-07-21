@@ -13,11 +13,13 @@ import time
 from fastapi import APIRouter, Depends, Request
 
 from ..catalog_sync import (
+    fetch_cloudflare_library,
     fetch_fireworks,
     fetch_fireworks_library,
     fetch_openrouter,
     probe_availability,
     reconcile,
+    reconcile_cloudflare_library,
     reconcile_fireworks_library,
     reconcile_openrouter,
 )
@@ -71,6 +73,26 @@ async def discover_fireworks(request: Request,
                 "total": 0, "filtered_out": 0, "models": []}
     fetched = await fetch_fireworks_library(key)
     models = reconcile_fireworks_library(
+        request.app.state.gateway.catalog_for(identity).models, fetched["models"])
+    return {**base, "key_present": True, "error": fetched["error"], "total": len(models),
+            "filtered_out": fetched["filtered_out"], "models": models}
+
+
+@router.get("/v1/admin/catalog/discovery/cloudflare")
+async def discover_cloudflare(request: Request,
+                              identity: Identity = Depends(require_read_role("member"))):
+    """Explore the Cloudflare Workers AI text-generation catalog, each flagged cataloged/catalog_id.
+    Needs BOTH CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID (the two-part credential); either
+    missing → key_present:false, graceful empty (same idiom as Fireworks' no-key state)."""
+    token = os.environ.get("CLOUDFLARE_API_TOKEN")
+    account = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
+    base = {"provider": "cloudflare", "checked_at": time.time()}
+    if not token or not account:
+        return {**base, "key_present": False,
+                "error": "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID not configured",
+                "total": 0, "filtered_out": 0, "models": []}
+    fetched = await fetch_cloudflare_library(token, account)
+    models = reconcile_cloudflare_library(
         request.app.state.gateway.catalog_for(identity).models, fetched["models"])
     return {**base, "key_present": True, "error": fetched["error"], "total": len(models),
             "filtered_out": fetched["filtered_out"], "models": models}
