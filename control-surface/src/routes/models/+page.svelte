@@ -195,21 +195,36 @@
     orQ.status === 'loading' && fwQ.status === 'loading' && cfQ.status === 'loading'
   );
   const libFresh = $derived(syncFreshness(orQ.data) || syncFreshness(fwQ.data) || syncFreshness(cfQ.data));
-  // one honest line per degraded source, appended to the count line
-  const sourceNotes = $derived(
-    [
-      orQ.status === 'error' || orQ.data?.error ? 'OpenRouter didn’t answer' : null,
+  // per-source health lives on the source tab itself: a short state in the chip, the full
+  // explanation as the pane when that source is selected. Never prose appended to the count line.
+  const sourceState = $derived({
+    openrouter:
+      orQ.status === 'error' || orQ.data?.error
+        ? { short: 'offline', title: 'OpenRouter didn’t answer', msg: 'The gateway couldn’t reach OpenRouter. Check connectivity, then Refresh sources.' }
+        : null,
+    fireworks:
       fwQ.status === 'error' || fwQ.data?.error
-        ? 'Fireworks didn’t answer'
+        ? { short: 'offline', title: 'Fireworks didn’t answer', msg: 'The gateway couldn’t reach Fireworks. Check connectivity, then Refresh sources.' }
         : fwQ.data && !fwQ.data.key_present
-          ? 'set FIREWORKS_API_KEY to browse Fireworks'
+          ? { short: 'no key', title: 'Fireworks isn’t connected', msg: 'Set FIREWORKS_API_KEY on the gateway to browse Fireworks models here.' }
           : null,
+    cloudflare:
       cfQ.data && !cfQ.data.key_present
-        ? 'set CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID to browse Cloudflare'
+        ? { short: 'no key', title: 'Cloudflare isn’t connected', msg: 'Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID on the gateway to browse Cloudflare models here.' }
         : cfQ.status === 'error' || cfQ.data?.error
-          ? 'Cloudflare didn’t answer'
+          ? { short: 'offline', title: 'Cloudflare didn’t answer', msg: 'The gateway couldn’t reach Cloudflare. Check connectivity, then Refresh sources.' }
           : null,
-    ].filter(Boolean)
+  });
+  const selectedDegraded = $derived(source !== 'all' ? sourceState[source] : null);
+  // provenance facts get their own quiet line under the counts instead of one crammed sentence
+  const factLine = $derived(
+    [
+      libFresh || null,
+      fwQ.data?.filtered_out ? `${fwQ.data.filtered_out} deprecated/embedding models hidden` : null,
+      filtered.length > LIB_CAP ? `showing the first ${LIB_CAP} — refine the search to see the rest` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ')
   );
   const routing = $derived(routingQ.status === 'ok' ? routingQ.data : null);
   const catalogIds = $derived((catQ.data?.models ?? []).map((m) => m.id));
@@ -251,19 +266,18 @@
 
 </script>
 
-<svelte:head><title>Models · Toto Control</title></svelte:head>
+<svelte:head><title>Model Library · Toto Control</title></svelte:head>
 
-<!-- ===== Hero ===== -->
-<div class="hero">
-  <h1 class="hero-serif">Models</h1>
-  <div class="actions">
+<div class="pagehead">
+  <div>
+    <h1>Model Library</h1>
+    <div class="sub">Adopt models here — they appear in your <a href="/catalog">Catalog</a>.</div>
+  </div>
+  <div class="right">
     <button class="btn" onclick={refreshSources}>Refresh sources</button>
     {#if !OSS}<a class="btn primary" href="/tuning">Train a model</a>{/if}
   </div>
 </div>
-
-<!-- ===== Library ===== -->
-<div class="mhead first"><h2>Library</h2></div>
 
 {#if orQ.status === 'unauthed' || fwQ.status === 'unauthed'}
   {@render deadend('Sign in required', 'Your session has expired. Sign in to browse the model library.')}
@@ -281,8 +295,10 @@
       aria-label="Search the model library"
     />
     <div class="seg" role="tablist" aria-label="Source">
-      {#each [['all', `All sources`], ['openrouter', `OpenRouter · ${orModels.length}`], ['fireworks', `Fireworks · ${fwModels.length}`], ['cloudflare', `Cloudflare · ${cfModels.length}`]] as [key, label] (key)}
-        <button class:on={source === key} aria-pressed={source === key} onclick={() => (source = key)}>{label}</button>
+      {#each [['all', 'All sources', null], ['openrouter', 'OpenRouter', orModels.length], ['fireworks', 'Fireworks', fwModels.length], ['cloudflare', 'Cloudflare', cfModels.length]] as [key, label, count] (key)}
+        <button class:on={source === key} aria-pressed={source === key} onclick={() => (source = key)}>
+          {label}{#if sourceState[key]}&nbsp;· <span class="st">{sourceState[key].short}</span>{:else if count != null}&nbsp;· {count}{/if}
+        </button>
       {/each}
     </div>
     {#each filterDefs as f (f.key)}
@@ -292,12 +308,17 @@
     {/each}
   </div>
   <p class="countline">
-    <b>{filtered.length}</b> of {pool.length} models · <b>{catalogedCount}</b> cataloged{libFresh ? ` · ${libFresh}` : ''}{#if fwQ.data?.filtered_out}&nbsp;· {fwQ.data.filtered_out} deprecated/embedding models hidden{/if}{#if filtered.length > LIB_CAP}&nbsp;· showing the first {LIB_CAP} — refine the search to see the rest{/if}{#each sourceNotes as n}&nbsp;· {n}{/each}
+    <b>{filtered.length}</b> of {pool.length} models · <b>{catalogedCount}</b> in your catalog
   </p>
+  {#if factLine}
+    <p class="quiet factline">{factLine}</p>
+  {/if}
   {#if notice}
     <p class="notice" role="status">{notice}</p>
   {/if}
-  {#if !filtered.length}
+  {#if selectedDegraded}
+    {@render deadend(selectedDegraded.title, selectedDegraded.msg)}
+  {:else if !filtered.length}
     <p class="quiet">No models match — clear a filter or the search.</p>
   {:else}
     <div class="libgrid" in:revealIn>
@@ -498,27 +519,7 @@
 {/snippet}
 
 <style>
-  /* ---- hero (locked v18: 62px Charter serif, actions on the baseline) ---- */
-  .hero {
-    display: flex;
-    align-items: flex-end;
-    gap: 18px;
-    flex-wrap: wrap;
-    margin: 48px 0 40px;
-  }
-  .hero h1 {
-    margin: 0;
-    font-size: 3.875rem; /* 62px */
-    line-height: 1;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-  }
-  .actions {
-    margin-left: auto;
-    display: flex;
-    gap: 10px;
-  }
-  .actions a.btn {
+  .pagehead a.btn {
     text-decoration: none;
     display: inline-flex;
     align-items: center;
@@ -535,18 +536,15 @@
   :global(:root[data-theme='dark']) .btn.primary { color: #0e1813; }
   :global(:root[data-theme='light']) .btn.primary { color: #fff; }
 
-  /* ---- bare section heads (26px, no chips/meta) ---- */
+  /* ---- section heads — the catalog page's secthead scale, below the 24px page title ---- */
   .mhead {
-    margin: 84px 0 24px;
-  }
-  .mhead.first {
-    margin-top: 0;
+    margin: 56px 0 18px;
   }
   .mhead h2 {
     margin: 0;
-    font-size: 1.625rem; /* 26px */
-    font-weight: calc(700 + (var(--ui-weight) - 400));
-    letter-spacing: -0.02em;
+    font-size: 1.25rem;
+    font-weight: calc(680 + (var(--ui-weight) - 400));
+    letter-spacing: -0.015em;
   }
 
   /* ---- library controls ---- */
@@ -595,6 +593,7 @@
     background: var(--accent-soft);
     color: var(--accent);
   }
+  .seg .st { color: var(--warn); }
   .fchip {
     border: 1px solid var(--line-2);
     background: var(--panel);
@@ -619,6 +618,8 @@
     color: var(--text-3);
   }
   .countline b { color: var(--text-2); }
+  .countline:has(+ .factline) { margin-bottom: 4px; }
+  .factline { margin: 0 0 14px; }
   .quiet {
     margin: 0;
     font-size: 0.75rem;
@@ -848,6 +849,5 @@
   @media (max-width: 760px) {
     .drawer { grid-template-columns: 1fr; }
     .dleft { border-right: 0; border-bottom: 1px solid var(--line); }
-    .hero h1 { font-size: 2.75rem; }
   }
 </style>
