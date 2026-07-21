@@ -30,7 +30,8 @@ export function prettyModel(raw) {
 
 export function providerLabel(p) {
   const map = { anthropic: 'Anthropic', openai: 'OpenAI', openrouter: 'OpenRouter',
-                fireworks: 'Fireworks', cloudflare: 'Cloudflare', local: 'Local', fake: 'Fake',
+                fireworks: 'Fireworks', cloudflare: 'Cloudflare', local: 'Local',
+                fake: 'Test models', // built-in echo entries — never say "fake" to users
                 google: 'Google' };
   if (!p) return '';
   return map[p] || (p.charAt(0).toUpperCase() + p.slice(1));

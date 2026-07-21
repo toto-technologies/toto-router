@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import math
 import os
-import time
+import re
 from types import SimpleNamespace
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
@@ -265,6 +266,63 @@ async def adopt(body: dict, request: Request,
         pass
 
     return JSONResponse(status_code=201, content={"entry": _view(stored)})  # console reads r.entry.id
+
+
+@router.post("/v1/admin/catalog/local-models")
+async def add_local_model(body: dict, request: Request,
+                          identity: Identity = Depends(require_role("admin"))):
+    """Register a locally running OpenAI-compatible server (Ollama, LM Studio, vLLM, mlx_lm) as a
+    routing destination. Body {name?, base_url, model}. Unlike provider adoptions there is no
+    discovery snapshot to derive facts from — the URL and model name ARE the user's facts (the
+    caller is an admin who could equally edit catalog YAML). Persists as an adoption row
+    (provider='local'), so it rides every existing seam: effective catalog, task-type binding,
+    /v1/models, and the same DELETE. The entry uses the bare-URL local runner (lane=economy +
+    endpoint=<url>): no API key, upstream_model sent as the server knows it."""
+    scope = _scope_key(identity)
+    if scope is None:
+        return _error(400, "operator has no adoption scope — add as an org admin",
+                      "invalid_request_error", "no_scope")
+    base_url = (body.get("base_url") or "").strip().rstrip("/")
+    model = (body.get("model") or "").strip()
+    parsed = urlparse(base_url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return _error(400, "base_url must be an http(s) URL, e.g. http://localhost:11434/v1",
+                      "invalid_request_error", "invalid_base_url")
+    if not model:
+        return _error(400, "model is required — the model name as your server knows it "
+                      "(e.g. llama3.1, qwen2.5-coder)", "invalid_request_error", "missing_model")
+
+    gw = request.app.state.gateway
+    base_ids = {e.id for e in gw.catalog.models}
+    existing = await request.app.state.auth.list_adoptions(scope)
+    # id from the display name (or model name): local-<slug>, bumped on collision — same
+    # suggestion scheme as provider adoptions, same fail-closed naming checks.
+    slug = re.sub(r"[^a-z0-9.]+", "-", (body.get("name") or _last_seg(model)).lower()).strip("-")
+    if not slug:
+        return _error(400, "name/model must contain some letters or digits",
+                      "invalid_request_error", "invalid_name")
+    id = _suggested_id(slug, base_ids | {r["id"] for r in existing}, "local")
+    tier = id_tier_words(id)
+    if tier:
+        return _error(400, f"name uses banned tier word(s) {sorted(tier)} — name the real model, "
+                      "not a tier", "invalid_request_error", "tier_word_id")
+
+    entry = CatalogEntry(
+        id=id, lane="economy", endpoint=base_url, residency_class="in_perimeter",
+        upstream_model=model, provider="local",
+        price_usd_per_1k=Price(prompt=0.0, completion=0.0),  # local marginal cost ~ electricity
+        context_window=int(body.get("context_window") or 0) or 8192,
+    )
+    stored = await request.app.state.auth.add_adoption(
+        scope, id, entry_json=entry.model_dump_json(), upstream_model=model, provider="local",
+        created_by=identity.user_id)
+    try:
+        await request.app.state.auth.write_audit(
+            "admin:catalog_adoption", user_id=identity.user_id, org_id=identity.org_id,
+            target_type="catalog_model", target_id=id, metadata='{"source":"local"}')
+    except Exception:
+        pass
+    return JSONResponse(status_code=201, content={"entry": _view(stored)})
 
 
 # --- manual price overrides (catalog-pricing-plane, Alex 2026-07-14) --------------------------

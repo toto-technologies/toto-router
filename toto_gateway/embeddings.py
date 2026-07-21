@@ -27,7 +27,12 @@ def _cos(a: list[float], b: list[float]) -> float:
 
 
 def load_exemplars(path: Path = _EXEMPLARS_PATH) -> dict[str, list[str]]:
-    return json.loads(path.read_text())
+    """Skill exemplars, or {} when the file isn't shipped (the OSS export drops eval/). Empty
+    exemplars mean infer_skill never matches — callers fall back — instead of failing the boot."""
+    try:
+        return json.loads(path.read_text())
+    except FileNotFoundError:
+        return {}
 
 
 class Embedder:

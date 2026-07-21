@@ -238,6 +238,12 @@ export const createAdoption = (source, slug) =>
 /** Remove an adopted model (base-catalog entries can't be removed). 200/204; 404 unknown id. */
 export const deleteAdoption = (id) => del(`/v1/admin/catalog/adoptions/${id}`);
 
+/** Register a locally running OpenAI-compatible server (Ollama, LM Studio, vLLM) as a routing
+ *  destination. Persists like an adoption (removable via deleteAdoption). 201 → {entry}.
+ *  @returns {Promise<{entry: import('./types').CatalogEntry}>} */
+export const createLocalModel = ({ name, baseUrl, model }) =>
+  post('/v1/admin/catalog/local-models', { name, base_url: baseUrl, model });
+
 /** The caller-scope adoptions — what "added by you" means on the Library.
  *  @returns {Promise<{adoptions: Array<{id: string, upstream_model: string, provider: string}>}>} */
 export const listAdoptions = () => get('/v1/admin/catalog/adoptions');

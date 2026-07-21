@@ -25,7 +25,7 @@ function rank(p) {
 
 // Generic two-letter monograms collide across the Open* providers (OpenAI/OpenRouter both "Op") —
 // override here rather than in benchmarks.js, which is the Benchmarks page's contract.
-const MARK_OVERRIDE = { openrouter: 'OR' };
+const MARK_OVERRIDE = { openrouter: 'OR', fake: 'Te' }; // fake renders as "Test models"
 export const catMark = (p) => MARK_OVERRIDE[p] ?? providerMark(p);
 
 /** Group catalog models into ordered provider modules with display identity + module-level facts. */
