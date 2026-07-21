@@ -275,6 +275,13 @@ def test_catalog_ids_tell_the_truth_about_their_upstream():
             "fw-glm-5.2": "accounts/fireworks/models/glm-5p2",
             "fw-deepseek-v4-pro": "accounts/fireworks/models/deepseek-v4-pro",
         },
+        "catalog.cloudflare.yaml": {
+            "cf-llama-3.1-8b-fp8": "@cf/meta/llama-3.1-8b-instruct-fp8-fast",
+            "cf-qwen3-30b-a3b": "@cf/qwen/qwen3-30b-a3b-fp8",
+            "cf-gpt-oss-20b": "@cf/openai/gpt-oss-20b",
+            "cf-gpt-oss-120b": "@cf/openai/gpt-oss-120b",
+            "cf-llama-3.3-70b-fp8": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        },
         "catalog.yaml": {
             "claude-sonnet-4.6": "claude-sonnet-4-6",
             "gpt-4o": "gpt-4o",
@@ -344,7 +351,8 @@ def test_catalog_ids_never_use_tier_words():
     tier word as a segment (or-economy, fw-value-general, …) fails CI here — the obfuscating
     convention cannot come back. Real model names that happen to be words (haiku, flash-as-in-
     gemini-flash) are fine because the guard checks OUR tier vocabulary, not model vocabulary."""
-    cat = Catalog.load("catalog.yaml,catalog.openrouter.yaml,catalog.fireworks.yaml,catalog.directlabs.yaml")
+    cat = Catalog.load("catalog.yaml,catalog.openrouter.yaml,catalog.fireworks.yaml,"
+                       "catalog.directlabs.yaml,catalog.cloudflare.yaml")
     for entry in cat.models:
         segments = set(entry.id.replace(".", "-").split("-"))
         bad = segments & BANNED_TIER_WORDS
@@ -358,7 +366,7 @@ def test_shared_ids_price_identically_across_fragments():
     pre-fix 1000x scale and overrode catalog.yaml's corrected row. Any legitimately diverging
     price belongs on ONE fragment's row (or a price override), never on a duplicated id."""
     fragments = ["catalog.yaml", "catalog.openrouter.yaml", "catalog.fireworks.yaml",
-                 "catalog.directlabs.yaml"]
+                 "catalog.directlabs.yaml", "catalog.cloudflare.yaml"]
     seen: dict[str, tuple[str, tuple]] = {}
     for path in fragments:
         for m in Catalog.load(path).models:

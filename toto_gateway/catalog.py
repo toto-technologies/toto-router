@@ -7,6 +7,7 @@ is the seed of the Phase-1 routing catalog — it just grows capability/latency/
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
@@ -112,6 +113,16 @@ class CatalogEntry(BaseModel):
     @property
     def effective_upstream_model(self) -> str:
         return self.upstream_model or self.id
+
+    @property
+    def resolved_base_url(self) -> str | None:
+        """base_url with ${ENV} references expanded from the environment — the seam for providers
+        whose URL embeds a non-secret account/region id (Cloudflare: .../accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1)
+        alongside the secret in api_key_env. A base_url with no $ is returned unchanged, so every
+        existing provider (OpenRouter, Fireworks, OpenAI) is byte-for-byte untouched. Use this
+        wherever base_url becomes an outbound HTTP target; host-only uses (egress allowlist, provider
+        grouping) can read the raw base_url since the host is never templated."""
+        return os.path.expandvars(self.base_url) if self.base_url else None
 
     @property
     def credential_scope_label(self) -> str | None:

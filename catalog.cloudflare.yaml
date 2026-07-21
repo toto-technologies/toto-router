@@ -1,0 +1,89 @@
+# Cloudflare Workers AI provider fragment — a self-contained catalog OVERLAY, not a standalone
+# environment catalog. Compose it onto a base with
+# TOTO_GW_CATALOG="catalog.openrouter.yaml,catalog.cloudflare.yaml" (Catalog.load merges
+# comma-separated files left-to-right; later files extend/override by id). Keeping Cloudflare in
+# its own file means no provider's models live inside another provider's catalog; adding a future
+# provider is a new fragment, not an edit to an unrelated file.
+#
+# Surface: Workers AI's OpenAI-compatible endpoint
+#   https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/{chat/completions,models}
+# It speaks OpenAI in / OpenAI out, so it's pure catalog — endpoint=openai + base_url + api_key_env,
+# exactly like OpenRouter and Fireworks. Serverless GPU inference is cloud → residency_class is
+# honestly `cloud`.
+#
+# TWO-PART CREDENTIAL (the one thing that differs from OpenRouter's single key):
+#   - CLOUDFLARE_API_TOKEN   → api_key_env → sent as the `Authorization: Bearer` token (standard
+#                              OpenAI-client path, zero custom code).
+#   - CLOUDFLARE_ACCOUNT_ID  → interpolated into base_url via ${CLOUDFLARE_ACCOUNT_ID}. The runner
+#                              expands it at client-construction time (CatalogEntry.resolved_base_url,
+#                              os.path.expandvars). A base_url with no $ is untouched, so every other
+#                              provider is byte-for-byte unaffected. Unset → the model lists but a
+#                              call fails, identical to any provider whose key isn't configured.
+#
+# Model set: a small, defensible spread across Cloudflare's open-model menu — cheapest small model
+# up to a capable 70B — not the full ~80-model catalog. Prices are Cloudflare's published per-token
+# rates (developers.cloudflare.com/workers-ai/platform/pricing, fetched 2026-07-21), converted from
+# $/1M to $/1k. Context windows are from each model's Cloudflare doc page (fetched 2026-07-21) —
+# Cloudflare serves several models at a REDUCED window vs the base model (e.g. llama-3.3-70b at 24k,
+# not Meta's 128k), so these are the honest served sizes, not the upstream maxima.
+#
+# tools: Cloudflare documents function calling for every model below. The flag is left at the schema
+# default (true), matching that documentation — NOT verified on the wire (no Cloudflare credentials
+# in this build). If a live call shows textified tool traffic like the OpenRouter quirks, flip the
+# offending entry to `tools: false`.
+
+models:
+  # Cheapest — an 8B "fast" (fp8) model for local-appropriate work (classify, grep, redact).
+  - id: cf-llama-3.1-8b-fp8
+    lane: economy
+    endpoint: openai
+    base_url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1
+    api_key_env: CLOUDFLARE_API_TOKEN
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.000045, completion: 0.000384 }
+    context_window: 128000
+    upstream_model: "@cf/meta/llama-3.1-8b-instruct-fp8-fast"
+
+  # Qwen3 30B A3B (fp8) — a cheap MoE reasoning model; small served window (32k).
+  - id: cf-qwen3-30b-a3b
+    lane: economy
+    endpoint: openai
+    base_url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1
+    api_key_env: CLOUDFLARE_API_TOKEN
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.000051, completion: 0.000335 }
+    context_window: 32768
+    upstream_model: "@cf/qwen/qwen3-30b-a3b-fp8"
+
+  # OpenAI's gpt-oss 20B open model — low-latency reasoning, 128k window.
+  - id: cf-gpt-oss-20b
+    lane: economy
+    endpoint: openai
+    base_url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1
+    api_key_env: CLOUDFLARE_API_TOKEN
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.0002, completion: 0.0003 }
+    context_window: 128000
+    upstream_model: "@cf/openai/gpt-oss-20b"
+
+  # OpenAI's gpt-oss 120B open model — the deeper-context / complex-task tier, 128k window.
+  - id: cf-gpt-oss-120b
+    lane: economy
+    endpoint: openai
+    base_url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1
+    api_key_env: CLOUDFLARE_API_TOKEN
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.00035, completion: 0.00075 }
+    context_window: 128000
+    upstream_model: "@cf/openai/gpt-oss-120b"
+
+  # Meta Llama 3.3 70B (fp8 "fast") — the most capable general model in this set; 24k served window.
+  - id: cf-llama-3.3-70b-fp8
+    lane: economy
+    endpoint: openai
+    base_url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1
+    api_key_env: CLOUDFLARE_API_TOKEN
+    residency_class: cloud
+    price_usd_per_1k: { prompt: 0.000293, completion: 0.002253 }
+    context_window: 24000
+    upstream_model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast"

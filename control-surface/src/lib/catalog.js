@@ -13,7 +13,7 @@ export const lastSeg = (s) => String(s ?? '').split('/').filter(Boolean).pop() ?
 // ---- Provider modules ---------------------------------------------------------------------------
 
 // Stable module order: the four first-class providers, then unknowns alphabetically, local/fake last.
-const FIRST = ['anthropic', 'openai', 'openrouter', 'fireworks'];
+const FIRST = ['anthropic', 'openai', 'openrouter', 'fireworks', 'cloudflare'];
 const LAST = ['local', 'fake'];
 function rank(p) {
   const f = FIRST.indexOf(p);

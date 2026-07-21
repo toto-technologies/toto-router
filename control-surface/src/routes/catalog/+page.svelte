@@ -916,7 +916,7 @@
           <h3>{g.label}</h3>
           <span class="pfacts">
             <span>{g.models.length} model{g.models.length === 1 ? '' : 's'}</span>
-            {#if g.provider === 'openrouter'}<span class="pfact">aggregator — many labs, one key</span>{/if}
+            {#if g.provider === 'openrouter' || g.provider === 'cloudflare'}<span class="pfact">aggregator — many labs, one key</span>{/if}
             {#if g.keyEnv}<span class="pfact n" title="The gateway reads this env var for the provider key">key: {g.keyEnv}</span>{/if}
             {#if g.fineTuned}<span class="pfact tuned">{g.fineTuned} fine-tuned</span>{/if}
           </span>

@@ -344,7 +344,10 @@ async def probe_availability(entries: list[CatalogEntry]) -> dict[str, Any]:
     async def _one(base_url: str, key: str) -> tuple[str, list[str] | None, str | None]:
         try:
             async with httpx.AsyncClient(timeout=30) as client:
-                return base_url, await fetch_provider_models(client, base_url, key), None
+                # Expand ${ENV} in the URL (Cloudflare embeds the account id) before the live GET;
+                # the returned key stays the raw base_url so declared/live reconcile by the same key.
+                target = os.path.expandvars(base_url)
+                return base_url, await fetch_provider_models(client, target, key), None
         except httpx.HTTPError as e:
             return base_url, None, f"{type(e).__name__}: {e}"
 
