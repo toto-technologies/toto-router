@@ -214,6 +214,42 @@ async def test_org_default_policy_changes_teamless_smart_chat_route():
 
 
 @pytest.mark.asyncio
+async def test_org_default_policy_applies_to_team_member_bearer_traffic():
+    """A caller on a TEAM that has no team routing row must still honor the org-default policy the
+    console saved. The overlay lookup used to pick the team key and stop — a team member's
+    bearer/API traffic saw NO overlay and routed globally, so console governance edits appeared
+    ignored. The fallback is on the ROW: no team policy → the org-default applies."""
+    gw, _ = _gw()
+    settings = default_settings(auth_token="", driver=False, fake_exec=False)
+    async with in_process_app(gateway=gw, settings=settings) as (client, app):
+        auth = app.state.auth
+        uid = await auth.create_user("eng@acme.com", None, email_verified=True)
+        org = await auth.create_org("Acme", org_id="o_acme")
+        team = await auth.create_team(org, "Eng", team_id="t_eng")
+        await auth.add_membership(org, uid, "admin", team_id=team)  # on a team, no team policy
+        await auth.set_routing_policy(org, org, bindings={"code_generation": "or-sonnet-4.6"})
+        raw, _ = await auth.mint_api_token(uid, "cli", org_id=org)
+
+        resp = await client.post(
+            "/v1/chat/completions",
+            headers={"authorization": f"Bearer {raw}"},
+            json={"model": "smart", "messages": [{"role": "user", "content": "write python"}]},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["model"] == "or-sonnet-4.6"  # org-default, not the global binding
+
+        # A team that DOES have its own policy still wins outright (org-default is only the fallback).
+        await auth.set_routing_policy(team, org, bindings={"code_generation": "or-haiku-4.5"})
+        resp2 = await client.post(
+            "/v1/chat/completions",
+            headers={"authorization": f"Bearer {raw}"},
+            json={"model": "smart", "messages": [{"role": "user", "content": "write more python"}]},
+        )
+        assert resp2.status_code == 200, resp2.text
+        assert resp2.json()["model"] == "or-haiku-4.5"  # team overlay beats the org-default
+
+
+@pytest.mark.asyncio
 async def test_team_custom_label_routes_to_its_bound_model():
     gw, _ = _gw(label_reply='{"label": "legal_review"}')   # a label only the team invented
     ident = _identity(routing_policy={"custom_labels": [
