@@ -52,23 +52,34 @@ below, never raises. The prompt variant is tunable (`TOTO_GW_LABEL_PROMPT_VARIAN
 
 ## Step 2 — resolve the label to a model (the binding ladder)
 
-For a classified label, `smart_route` walks this precedence and stops at the first model that both
-exists in the catalog and can satisfy the request's tool needs (a tools-bearing request never
-resolves to an entry that can't speak native tool calling):
+The rule: **silence gets intelligence, speech gets obedience.** A label a human *bound* is obeyed
+for all traffic; the optimizer (benchmark-best) only governs the labels nobody bound. `smart_route`
+resolves a classified label like this:
 
-1. **Custom / team binding** — a per-caller routing overlay's `label_bindings[label]`, or a
-   custom-label model. (In the open edition there is one caller — the operator — whose overlay lives
-   under the `local` scope and is edited in the console; see below.) `route_reason: label:<l>:team`.
-2. **Global binding** — `labels.yaml`'s default binding for the label. `route_reason: label:<l>`.
-3. **Benchmark-best on the label's category** — if the label is classified but *unbound* (its binding
-   was cleared, or it's `other`/`redact`), route to the benchmark-best real entry for the label's
+1. **Explicit binding** — a per-caller overlay's `label_bindings[label]`, a custom-label model, or
+   `labels.yaml`'s default binding. (In the open edition there is one caller — the operator — whose
+   overlay lives under the `local` scope and is edited in the console; see below.) The binding
+   governs **all** traffic for the label, tools or not — the optimizer never silently overrides it.
+   `route_reason: label:<l>:team` (overlay) or `label:<l>` (global default). The optimizer is
+   demoted to an **advisor**: benchmark-best is still computed, and when it differs from the binding
+   it's recorded in `label_metadata.benchmark_pick` (the console renders it as a "benchmark pick:
+   …" hint next to the binding row). If the bound model **can't speak native tools** and the request
+   carries tools, the **tools guard** applies *after* precedence:
+   - default — a tools-capable fallback is served and the guard is recorded:
+     `route_reason: label:<l>:tools_guard` (the binding stands as intent; never a silent benchmark
+     override).
+   - escape hatch — `optimizer_steers_tools: true` on the policy restores the pre-precedence
+     behavior for that tool traffic: benchmark-best, `route_reason: label:<l>:benchmark_best:<cat>`.
+2. **Benchmark-best on the label's category** — ONLY when the label is *unbound* (its binding was
+   cleared, or it's `other`/`redact`): route to the benchmark-best real entry for the label's
    evidence category. `route_reason: label:<l>:benchmark_best:<cat>`.
-4. **Fallback model** — the designated catch-all (`other` binding), else the driver's benchmark
+3. **Fallback model** — the designated catch-all (`other` binding), else the driver's benchmark
    argmax with empty metadata, else any usable catalog entry. Also the landing spot when the
    classifier fails entirely: `route_reason: smart:classify_failed`.
 
 The `optimize` preset (`quality` | `balanced` | `cost`) breaks benchmark ties — but only on the
-fallback / benchmark-best paths. **A bound label is a fixed pick;** optimize does not second-guess it.
+benchmark-best / fallback paths and the advisor pick. **A bound label is a fixed pick;** optimize
+does not second-guess it.
 
 ## Step 3 — hard constraints (guard + policy)
 
