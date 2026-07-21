@@ -331,7 +331,7 @@ class OpenAIRunner:
             from openai import AsyncOpenAI
 
             return AsyncOpenAI(
-                base_url=active_entry.base_url,
+                base_url=active_entry.resolved_base_url,
                 api_key=override,
                 default_headers={"X-Title": "toto-gateway"},
                 timeout=timeout, max_retries=0,
@@ -343,7 +343,7 @@ class OpenAIRunner:
             # provider (OpenRouter, Together, Fireworks, a direct lab) is a catalog entry, not
             # a code change. base_url=None → OpenAI default.
             self._client = AsyncOpenAI(
-                base_url=active_entry.base_url,
+                base_url=active_entry.resolved_base_url,
                 api_key=os.environ.get(active_entry.api_key_env),
                 default_headers={"X-Title": "toto-gateway"},
                 timeout=timeout, max_retries=0,

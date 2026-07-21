@@ -25,6 +25,7 @@ const PROVIDER_HUE = {
   zhipu: 188, 'z-ai': 188,
   ai21: 260,
   fireworks: 12,
+  cloudflare: 32,     // orange — Cloudflare's brand
   local: 130,         // sage — the house accent family, reserved for in-perimeter
 };
 

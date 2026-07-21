@@ -24,6 +24,8 @@ def _provider_of(entry: CatalogEntry) -> str:
         return "openrouter"
     if "FIREWORKS" in key or "fireworks" in base:
         return "fireworks"
+    if "CLOUDFLARE" in key or "cloudflare" in base:
+        return "cloudflare"
     if ep in ("anthropic", "openai"):
         return ep
     if ep == "fake":
