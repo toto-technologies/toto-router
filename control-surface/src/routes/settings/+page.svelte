@@ -27,6 +27,13 @@
   } from '$lib/api/admin.js';
   import { currentTheme, toggleTheme } from '$lib/theme.js';
   import { revealIn } from '$lib/motion.js';
+  // Single-tenant connections (OSS): stored provider keys + local models. Both are
+  // self-contained components; this page only mounts them.
+  import ProviderConnections from '$lib/components/ProviderConnections.svelte';
+  import AddLocalModel from '$lib/components/AddLocalModel.svelte';
+
+  let lmOpen = $state(false);
+  let lmAdded = $state(''); // id of the last catalog entry added, shown as confirmation
 
   // getOrg/renameOrg are both require_role("owner") server-side (toto_gateway/routes/
   // admin_tenancy.py) — a non-owner sees the query's own `forbidden` branch for the
@@ -629,7 +636,7 @@
 <div class="pagehead">
   <div>
     <h1>Settings</h1>
-    <div class="sub">{OSS ? 'Appearance and API keys.' : 'Organization profile, appearance, identity, and danger zone.'}</div>
+    <div class="sub">{OSS ? 'Appearance, API keys, and provider connections.' : 'Organization profile, appearance, identity, and danger zone.'}</div>
   </div>
 </div>
 
@@ -754,6 +761,23 @@
     </div>
   {/if}
 </Card>
+
+<!-- ========================= CONNECTIONS (single-tenant OSS) ========================= -->
+{#if OSS}
+  <ProviderConnections />
+  <Card title="Local models">
+    <div class="settingsrow">
+      <div>
+        <b>Your own hardware</b>
+        <p class="hint">Point the router at an OpenAI-compatible server on your machine or
+          network — Ollama, LM Studio, vLLM. No API key needed.
+          {#if lmAdded}<b>Added {lmAdded} to the catalog.</b>{/if}</p>
+      </div>
+      <button class="btn primary" onclick={() => (lmOpen = true)}>Add local model</button>
+    </div>
+  </Card>
+  <AddLocalModel bind:open={lmOpen} onadded={(entry) => (lmAdded = entry?.id ?? 'model')} />
+{/if}
 
 <!-- ========================= ORGANIZATION TOKENS (admin) ========================= -->
 <!-- Org-scoped cards below (service tokens, org provider keys, storage connector, SSO,
