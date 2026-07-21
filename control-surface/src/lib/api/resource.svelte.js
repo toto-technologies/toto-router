@@ -24,7 +24,7 @@ import { ApiError } from './client.js';
 function looksEmpty(data) {
   if (data == null) return true;
   if (Array.isArray(data)) return data.length === 0;
-  for (const k of ['teams', 'members', 'invitations', 'events', 'rows', 'line_items', 'labels', 'tokens']) {
+  for (const k of ['teams', 'members', 'invitations', 'events', 'rows', 'line_items', 'labels', 'tokens', 'requests']) {
     if (Array.isArray(data[k])) return data[k].length === 0;
   }
   return false;

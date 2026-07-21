@@ -8,6 +8,6 @@
 
 <div class="seg" class:cyan={accent} aria-disabled={disabled} style={disabled ? 'opacity:.7' : ''}>
   {#each options.map(norm) as opt}
-    <button class:on={value === opt.value} disabled={disabled && value !== opt.value} style={disabled ? 'cursor:default' : ''} onclick={() => pick(opt.value)}>{opt.label}</button>
+    <button class:on={value === opt.value} aria-pressed={value === opt.value} disabled={disabled && value !== opt.value} style={disabled ? 'cursor:default' : ''} onclick={() => pick(opt.value)}>{opt.label}</button>
   {/each}
 </div>
