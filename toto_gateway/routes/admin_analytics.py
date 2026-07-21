@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from ..analytics import activity_bundle, escalation_rates, generate_insights, model_drilldown
+from ..analytics import activity_bundle, generate_insights, model_drilldown
 from .admin_usage import _engine_or_error, _scope_org
 from .deps import Identity, require_read_role
 
@@ -78,27 +78,6 @@ async def get_model_drilldown(
     detail = model_drilldown(engine, org_id=org, model=model, start=start, end=end,
                              catalog=request.app.state.gateway.catalog)  # base-catalog-ok: cost aggregation over trace rows, platform-priced
     return {"org_id": org, "start": start, "end": end, **detail}
-
-
-@router.get("/v1/admin/analytics/escalations")
-async def get_escalations(
-    request: Request,
-    start: str | None = Query(None),
-    end: str | None = Query(None),
-    org_id: str | None = Query(None),
-    identity: Identity = Depends(require_read_role("admin")),
-):
-    """Per-task-type escalation rate (retry-on-frontier signal) for the caller's org over
-    [start, end) (default: last 30 days). Org-scoped at the SQL floor; auditor-readable."""
-    org, err = _scope_org(identity, org_id)
-    if err is not None:
-        return err
-    engine, err = _engine_or_error(request)
-    if err is not None:
-        return err
-    start, end = _default_window(start, end)
-    rates = escalation_rates(engine, org_id=org, start=start, end=end)
-    return {"org_id": org, "start": start, "end": end, **rates}
 
 
 @router.get("/v1/admin/analytics/insights")

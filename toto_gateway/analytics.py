@@ -92,28 +92,6 @@ def model_drilldown(engine: Any, *, org_id: str, model: str, start: str | None,
     return {"model": target, "catalog_ids": catalog_ids, "totals": totals, "by_label": labels}
 
 
-def escalation_rates(engine: Any, *, org_id: str, start: str | None, end: str | None) -> dict:
-    """Per-task-type escalation rate for ONE org over [start, end) — the routing-dissatisfaction
-    signal (W3-C3). Reuses the per-label `rollup_usage` slice (no new SQL): each row already carries
-    `requests` and `escalations` (escalated_from-tagged), so share = escalations / requests. Mirrors
-    the `fast_path` {requests, share} shape (metering.latency_breakdown). NULL label folds into
-    "unclassified". `total` is the org-wide {requests, escalations, share} across all labels.
-    """
-    by_label = [
-        {"label": _label(r), "requests": r["requests"], "escalations": r["escalations"],
-         "share": round(r["escalations"] / r["requests"], 4) if r["requests"] else 0.0}
-        for r in rollup_usage(engine, org_id=org_id, group_by=["label"], start=start, end=end)
-    ]
-    by_label.sort(key=lambda r: r["escalations"], reverse=True)
-    reqs = sum(r["requests"] for r in by_label)
-    esc = sum(r["escalations"] for r in by_label)
-    return {
-        "total": {"requests": reqs, "escalations": esc,
-                  "share": round(esc / reqs, 4) if reqs else 0.0},
-        "by_label": by_label,
-    }
-
-
 def activity_bundle(engine: Any, *, org_id: str, start: str | None, end: str | None,
                     catalog=None) -> dict:
     """Compose `rollup_usage` slices into one activity payload for ONE org over [start, end).
