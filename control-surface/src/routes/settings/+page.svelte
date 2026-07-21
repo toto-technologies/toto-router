@@ -1483,7 +1483,7 @@
 
 <style>
   /* Layout only — colors/type/spacing tokens all come from app.css. */
-  :global(.card + .card) { margin-top: 16px; }
+  :global(.card + .card) { margin-top: var(--gap-block); }
   .settingsrow { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
   .orgname { font-size: 0.9375rem; font-weight: calc(650 + (var(--ui-weight) - 400)); letter-spacing: -0.01em; }
   .hint { margin: 3px 0 0; color: var(--text-3); font-size: 0.75rem; max-width: 46ch; }
@@ -1522,13 +1522,13 @@
   .headbtn { margin-left: auto; }
   .baseurl { display: flex; align-items: center; gap: 10px; margin: 4px 0 14px; flex-wrap: wrap; }
   .baseurl .bl { font-size: 0.6875rem; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); font-weight: calc(600 + (var(--ui-weight) - 400)); }
-  .baseurl code { font-size: 0.78125rem; color: var(--text-2); background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 5px 9px; }
+  .baseurl code { font-size: 0.8125rem; color: var(--text-2); background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 5px 9px; }
   .skrows { display: flex; flex-direction: column; gap: 9px; padding: 4px 0; }
   .emptyk { color: var(--text-3); font-size: 0.8125rem; padding: 10px 0 4px; }
   .ta-r { text-align: right; }
   .policyrow { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; margin-top: 10px; }
   .policyrow .field { margin: 0; }
   .secretrow { display: flex; align-items: center; gap: 9px; }
-  .secret { flex: 1 1 auto; overflow-x: auto; white-space: nowrap; background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: 8px; padding: 9px 11px; color: var(--accent); font-size: 0.78125rem; }
+  .secret { flex: 1 1 auto; overflow-x: auto; white-space: nowrap; background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: 8px; padding: 9px 11px; color: var(--accent); font-size: 0.8125rem; }
   .secretrow .btn { flex: 0 0 auto; }
 </style>

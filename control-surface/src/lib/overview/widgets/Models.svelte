@@ -81,7 +81,7 @@
 <style>
   .sk-stack { display: flex; flex-direction: column; gap: 10px; }
   .deadend { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding: 4px 2px; }
-  .deadend p { margin: 0; font-size: 0.78125rem; color: var(--text-2); }
+  .deadend p { margin: 0; font-size: 0.8125rem; color: var(--text-2); }
 
   .rows { display: flex; flex-direction: column; gap: 4px; }
   .mrow { display: flex; align-items: center; gap: 9px; padding: 4px 0; min-width: 0; }
@@ -89,9 +89,9 @@
   /* vendored logo marks are filled paths; app.css .mglyph svg defaults to stroke-only */
   .mglyph :global(svg.plogo) { width: 13px; height: 13px; fill: currentColor; stroke: none; }
   .mark { font-size: 0.625rem; font-weight: calc(650 + (var(--ui-weight) - 400)); }
-  .stat { font-size: 0.71875rem; color: var(--text-2); white-space: nowrap; }
+  .stat { font-size: 0.75rem; color: var(--text-2); white-space: nowrap; }
   .stat.cost { color: var(--text); min-width: 42px; text-align: right; }
-  .share { font-size: 0.71875rem; color: var(--text-2); min-width: 32px; text-align: right; }
+  .share { font-size: 0.75rem; color: var(--text-2); min-width: 32px; text-align: right; }
 
   /* share-of-spend bar — accent is a brand-neutral ranking here, never a residency claim (§4 W3) */
   .sharebar { width: 62px; height: 4px; border-radius: 3px; background: var(--line); overflow: hidden; flex: 0 0 auto; }

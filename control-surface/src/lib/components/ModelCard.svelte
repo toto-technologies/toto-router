@@ -238,7 +238,7 @@
     align-self: stretch;
   }
   .caps {
-    font-size: 0.65625rem;
+    font-size: 0.6875rem;
     font-weight: calc(600 + (var(--ui-weight) - 400));
     color: var(--text-3);
     letter-spacing: 0.02em;
@@ -309,7 +309,7 @@
     gap: 1px;
     flex: none;
     margin-left: auto;
-    font-size: 0.65625rem;
+    font-size: 0.6875rem;
     font-weight: calc(600 + (var(--ui-weight) - 400));
     color: var(--text-2);
     line-height: 1.5;

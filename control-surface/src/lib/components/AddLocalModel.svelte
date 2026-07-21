@@ -87,12 +87,12 @@
   }
   .fieldnote {
     margin-top: 6px;
-    font-size: 0.65625rem;
+    font-size: 0.6875rem;
     color: var(--text-3);
   }
   .fielderr {
     margin-top: 6px;
-    font-size: 0.71875rem;
+    font-size: 0.75rem;
     color: var(--crit);
   }
   .btn.ghost {

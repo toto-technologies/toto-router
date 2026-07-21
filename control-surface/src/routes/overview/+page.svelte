@@ -332,7 +332,7 @@
 
 <style>
   .greet { margin: 0; font-size: 1.625rem; font-weight: 400; letter-spacing: -0.01em; color: var(--text); }
-  .statusline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 6px; margin-top: 3px; font-size: 0.78125rem; color: var(--text-2); }
+  .statusline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 6px; margin-top: 3px; font-size: 0.8125rem; color: var(--text-2); }
   .statusline > span + span::before { content: '·'; margin-right: 6px; color: var(--text-3); }
   .statusline .hc.warn { color: var(--warn); }
   .statusline .hc.crit { color: var(--crit); }
@@ -368,7 +368,7 @@
   /* page-level auth dead-ends (unchanged from the old page) */
   .deadend { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding: 8px 2px; }
   .deadend b { font-size: 0.875rem; }
-  .deadend p { margin: 0; font-size: 0.78125rem; color: var(--text-2); }
+  .deadend p { margin: 0; font-size: 0.8125rem; color: var(--text-2); }
 
   /* visually hidden aria-live region for reorder announcements */
   .srlive { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

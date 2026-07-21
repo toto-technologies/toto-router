@@ -60,13 +60,13 @@
 <style>
   .hero { display: flex; align-items: baseline; gap: 8px; }
   .hero .big { font-family: var(--mono); font-size: 1.5625rem; font-weight: calc(600 + (var(--ui-weight) - 400)); letter-spacing: -0.02em; line-height: 1; color: var(--good); }
-  .hero .cap { font-size: 0.78125rem; color: var(--text-2); }
+  .hero .cap { font-size: 0.8125rem; color: var(--text-2); }
 
   .sent { margin: 10px 0 0; font-size: 0.75rem; color: var(--text-2); }
 
   .meterrow { display: flex; align-items: center; gap: 9px; margin-top: 11px; }
   .meterrow .wbar { flex: 1; }
-  .meterrow .pct { font-size: 0.71875rem; color: var(--text-2); }
+  .meterrow .pct { font-size: 0.75rem; color: var(--text-2); }
   .fill { background: linear-gradient(90deg, var(--good), color-mix(in srgb, var(--good) 60%, var(--accent-2)));
     transform-origin: left; animation: grow 0.3s cubic-bezier(0.33, 1, 0.68, 1); }
   /* §5 meter reveal — the global prefers-reduced-motion rule zeroes this animation */
@@ -74,5 +74,5 @@
 
   .sk-stack { display: flex; flex-direction: column; gap: 10px; }
   .deadend { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding: 4px 2px; }
-  .deadend p { margin: 0; font-size: 0.78125rem; color: var(--text-2); }
+  .deadend p { margin: 0; font-size: 0.8125rem; color: var(--text-2); }
 </style>

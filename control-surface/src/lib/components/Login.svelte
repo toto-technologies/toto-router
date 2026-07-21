@@ -324,7 +324,7 @@
     cursor: default;
   }
   .authmsg {
-    font-size: 0.71875rem;
+    font-size: 0.75rem;
     padding: 9px 11px;
     border-radius: 8px;
     margin-bottom: 12px;

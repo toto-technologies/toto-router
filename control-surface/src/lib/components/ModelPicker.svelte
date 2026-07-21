@@ -417,11 +417,11 @@
     font-size: 0.8125rem;
     outline: none;
   }
-  .mp-pinhint { font-size: 0.65625rem; color: var(--accent); white-space: nowrap; }
+  .mp-pinhint { font-size: 0.6875rem; color: var(--accent); white-space: nowrap; }
   .mp-cmpill {
     all: unset;
     cursor: pointer;
-    font-size: 0.65625rem;
+    font-size: 0.6875rem;
     font-weight: calc(600 + (var(--ui-weight) - 400));
     color: var(--accent);
     border: 1px solid var(--accent-line);
@@ -484,7 +484,7 @@
   .mp-pin:focus-visible { outline: 1px solid var(--accent-line); }
   .mp-pin.on { color: var(--accent); background: var(--accent-soft); }
   .mp-pin svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 1.6; }
-  .mp-empty { padding: 18px 12px; text-align: center; color: var(--text-3); font-size: 0.78125rem; }
+  .mp-empty { padding: 18px 12px; text-align: center; color: var(--text-3); font-size: 0.8125rem; }
   .mp-foot {
     flex: 0 0 auto;
     padding: 6px 12px;
@@ -502,13 +502,13 @@
     flex-wrap: wrap;
   }
   .mp-cmphead b { font-size: 0.8125rem; }
-  .mp-thesis { font-size: 0.71875rem; color: var(--text-2); }
+  .mp-thesis { font-size: 0.75rem; color: var(--text-2); }
   .mp-thesis.cold { color: var(--text-3); }
   .mp-back {
     all: unset;
     cursor: pointer;
     margin-left: auto;
-    font-size: 0.71875rem;
+    font-size: 0.75rem;
     color: var(--accent);
   }
   .mp-back:focus-visible { outline: 1px solid var(--accent-line); }
@@ -547,7 +547,7 @@
     gap: 8px;
     padding: 5px 0;
     border-top: 1px solid var(--line);
-    font-size: 0.71875rem;
+    font-size: 0.75rem;
   }
   .mp-col dt { color: var(--text-3); }
   .mp-col dd { margin: 0; color: var(--text); text-align: right; }

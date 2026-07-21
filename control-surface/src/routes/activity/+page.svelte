@@ -384,7 +384,7 @@
     gap: 16px;
     padding: 8px 0;
     border-top: 1px solid var(--line);
-    font-size: 0.78125rem;
+    font-size: 0.8125rem;
   }
   .drow dt {
     color: var(--text-3);
@@ -414,7 +414,7 @@
   }
   .cblock h4 {
     margin: 0 0 6px;
-    font-size: 0.65625rem;
+    font-size: 0.6875rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--text-3);
