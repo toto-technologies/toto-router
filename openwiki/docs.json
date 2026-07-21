@@ -1,0 +1,50 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "toto-router",
+  "colors": {
+    "primary": "#6D5EF6",
+    "light": "#9B8FF9",
+    "dark": "#4B3FD1"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get Started",
+        "pages": [
+          "quickstart"
+        ]
+      },
+      {
+        "group": "Architecture",
+        "pages": [
+          "architecture/architecture",
+          "architecture/routing",
+          "architecture/caching",
+          "architecture/anthropic-surface"
+        ]
+      },
+      {
+        "group": "Domain",
+        "pages": [
+          "domain/catalog-and-providers",
+          "domain/identity-and-auth",
+          "domain/trace-and-metering"
+        ]
+      },
+      {
+        "group": "Operations",
+        "pages": [
+          "operations/configuration",
+          "operations/console"
+        ]
+      },
+      {
+        "group": "Testing",
+        "pages": [
+          "testing/testing"
+        ]
+      }
+    ]
+  }
+}
