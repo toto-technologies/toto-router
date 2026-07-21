@@ -81,6 +81,13 @@ def _catalog(request: Request):
     return getattr(gw, "catalog", None)  # base-catalog-ok: fallback for reduced test apps only — handlers pass _scope_catalog
 
 
+def _benchmarks(request: Request):
+    """The gateway's benchmark table (or None on a reduced test app) — used to compute the per-label
+    advisor pick (`benchmark_pick`) the console shows next to a bound row."""
+    gw = getattr(request.app.state, "gateway", None)
+    return getattr(gw, "_benchmarks", None)
+
+
 # A description under this many words is rejected outright — the classifier can't reliably match
 # one or two words against a request. The console warns (softly) below ~5 words; the hard floor
 # here is deliberately lower so a terse-but-real description still saves.
@@ -151,7 +158,7 @@ def _routing_view(request: Request, policy: dict | None, catalog=None) -> tuple[
     """(label rows, custom labels) for a routing-policy GET — the merged view of the global vocab
     plus this scope's overlay + invented task types. Shared by the team and org endpoints.
 
-    The view reports DISPATCH TRUTH, resolved through the catalog exactly like smart._bound does:
+    The view reports DISPATCH TRUTH, resolved through the catalog exactly like smart._binding_entry does:
     a stored binding is displayed as the entry it actually resolves to (so a legacy-alias binding
     shows the real model name), and a binding whose model has been RETIRED from the catalog is
     flagged `stale: true` with `model` falling back to the default — because that is what routing
@@ -161,6 +168,17 @@ def _routing_view(request: Request, policy: dict | None, catalog=None) -> tuple[
     labels = _global_bindings(request)
     if catalog is None:  # callers pass the scope's effective catalog (_scope_catalog); base fallback
         catalog = _catalog(request)
+    benchmarks = _benchmarks(request)
+
+    def _advisor(label, routed_model):
+        """The optimizer's benchmark pick for `label`, shown only when it DIFFERS from the model
+        the scope actually routes to (the advisor demoted below an explicit binding). None → the
+        binding IS the benchmark best, or no benchmark category / no data."""
+        if catalog is None or benchmarks is None:
+            return None
+        from ..routing.smart import benchmark_pick_for
+        pick = benchmark_pick_for(label, catalog, labels, benchmarks, None)
+        return pick if pick and pick != routed_model else None
 
     def _resolved(model_id):
         """(display_id, stale): the catalog-resolved id for a stored key, or (None, True) when the
@@ -187,13 +205,15 @@ def _routing_view(request: Request, policy: dict | None, catalog=None) -> tuple[
             from ..catalog import normalize_legacy_id
             override = normalize_legacy_id(override)
         resolved, stale = _resolved(override)
+        routed = resolved or default_model
         rows.append({
             "label": label,
             "desc": desc,
-            "model": resolved or default_model,        # what routing actually uses for this scope
+            "model": routed,                           # what routing actually uses for this scope
             "default_model": default_model,            # the global auto-selection
             "overridden": override is not None and not stale,
             "bound_model": override,                   # the stored key, normalized (None if unset)
+            "benchmark_pick": _advisor(label, routed) if bindable else None,  # optimizer advice when it differs
             "stale": stale,
             "bindable": bindable,
             "custom": False,
@@ -465,6 +485,7 @@ async def get_org_routing_policy(request: Request, org_id: str | None = Query(No
         "fail_policy": (policy or {}).get("fail_policy") or "open",
         "taxonomy": (policy or {}).get("taxonomy") or {},
         "classifier_model": (policy or {}).get("classifier_model") or None,
+        "optimizer_steers_tools": bool((policy or {}).get("optimizer_steers_tools")),
         "labels": rows,
         "custom_labels": custom,
     }
@@ -511,6 +532,7 @@ async def put_org_routing_policy(body: dict, request: Request, org_id: str | Non
         org, org, bindings=bindings, optimize=optimize,
         custom_labels=custom_labels, prewarm=bool(body.get("prewarm")), stick_ttls=stick_ttls,
         cache=cache, fail_policy=fail_policy, taxonomy=taxonomy, classifier_model=classifier_model,
+        optimizer_steers_tools=bool(body.get("optimizer_steers_tools")),
         updated_by=identity.user_id,
     )
     try:
@@ -529,6 +551,7 @@ async def put_org_routing_policy(body: dict, request: Request, org_id: str | Non
             "fail_policy": (policy or {}).get("fail_policy") or "open",
             "taxonomy": (policy or {}).get("taxonomy") or {},
             "classifier_model": (policy or {}).get("classifier_model") or None,
+            "optimizer_steers_tools": bool((policy or {}).get("optimizer_steers_tools")),
             "labels": rows, "custom_labels": custom}
 
 
@@ -552,6 +575,7 @@ async def get_routing_policy(team_id: str, request: Request,
         "cache": (policy or {}).get("cache") or {},
         "fail_policy": (policy or {}).get("fail_policy") or "open",
         "taxonomy": (policy or {}).get("taxonomy") or {},
+        "optimizer_steers_tools": bool((policy or {}).get("optimizer_steers_tools")),
         "labels": rows,
         "custom_labels": custom,
     }
@@ -587,7 +611,9 @@ async def put_routing_policy(team_id: str, body: dict, request: Request,
     policy = await auth.set_routing_policy(
         team_id, team["org_id"], bindings=bindings, optimize=optimize,
         custom_labels=custom_labels, prewarm=bool(body.get("prewarm")), stick_ttls=stick_ttls,
-        cache=cache, fail_policy=fail_policy, taxonomy=taxonomy, updated_by=identity.user_id,
+        cache=cache, fail_policy=fail_policy, taxonomy=taxonomy,
+        optimizer_steers_tools=bool(body.get("optimizer_steers_tools")),
+        updated_by=identity.user_id,
     )
     try:  # best-effort audit under the reserved admin:* namespace
         await auth.write_audit("admin:routing_policy", user_id=identity.user_id,

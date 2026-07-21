@@ -86,6 +86,13 @@ class Policy:
         # (admin_routing) refuses a classifier whose residency_class != in_perimeter — the classify
         # runs BEFORE the residency guard, so the in-perimeter guarantee has to hold at config time.
         self.classifier_model: str | None = None
+        # Binding precedence escape hatch. False (default) → an explicit label binding governs ALL
+        # traffic for that label; a tools request whose bound model can't speak tools takes the
+        # tools guard, never a silent benchmark override. True → restore the pre-precedence behavior:
+        # the optimizer may steer such tool traffic to the benchmark best. effective_policy()
+        # populates it from the team/org routing overlay; absent → False (byte-identical to bindings-
+        # govern). Read in routing/smart.py at the bound-but-non-tool branch.
+        self.optimizer_steers_tools: bool = False
 
     @classmethod
     def from_catalog_scope(cls, blob: dict, *, base: "Policy | None" = None) -> "Policy":

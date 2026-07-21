@@ -156,6 +156,7 @@ CREATE TABLE IF NOT EXISTS routing_policies (
   fail_policy   TEXT NOT NULL DEFAULT 'open', -- open (degrade to floor, default) | closed (503 on smart-routing degradation) | a JSON per-reason matrix
   taxonomy      TEXT NOT NULL DEFAULT '{}',   -- JSON: data-classification labels bound to residency constraints {labels:{<l>:{constraint,desc}}, default}
   classifier_model TEXT,                        -- org's chosen in-perimeter classifier id (NULL = gateway default)
+  optimizer_steers_tools INTEGER NOT NULL DEFAULT 0, -- 0=bindings govern tool traffic (advisor); 1=pre-precedence benchmark override
   version       INTEGER NOT NULL DEFAULT 1,
   updated_by    TEXT,
   updated_at    REAL NOT NULL
@@ -432,6 +433,13 @@ def apply_migrations(db, pg: bool) -> None:
     try:
         db.execute(
             f"ALTER TABLE routing_policies ADD COLUMN {ine}classifier_model TEXT")
+    except sqlite3.OperationalError:
+        pass
+    # Binding-precedence escape hatch: additive per-org boolean. Absence -> 0 -> bindings govern
+    # tool traffic (the optimizer is an advisor); 1 restores the pre-precedence benchmark override.
+    try:
+        db.execute(
+            f"ALTER TABLE routing_policies ADD COLUMN {ine}optimizer_steers_tools INTEGER NOT NULL DEFAULT 0")
     except sqlite3.OperationalError:
         pass
     # Zero-retention mode: additive per-org privacy switch. Absence -> 0 -> env flags apply

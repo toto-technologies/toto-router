@@ -82,6 +82,7 @@ class PoliciesMixin:
         d["fail_policy"] = fp
         d["taxonomy"] = json.loads(d.get("taxonomy") or "{}")  # data-classification taxonomy
         d["classifier_model"] = d.get("classifier_model") or None  # org classifier (NULL = default)
+        d["optimizer_steers_tools"] = bool(d.get("optimizer_steers_tools"))  # 0/1 -> bool for API + policy
         return d
 
     async def set_routing_policy(self, team_id: str, org_id: str, *,
@@ -94,6 +95,7 @@ class PoliciesMixin:
                                  fail_policy: str | dict | None = None,
                                  taxonomy: dict | None = None,
                                  classifier_model: str | None = None,
+                                 optimizer_steers_tools: bool | None = None,
                                  updated_by: str | None = None) -> dict:
         """Upsert the team's routing overlay, bumping `version` on every write. Fail-closed on an
         unknown optimize preset (catalog-existence of a bound model + custom-label slug/collision are
@@ -115,19 +117,22 @@ class PoliciesMixin:
             fp = "closed" if fail_policy == "closed" else "open"
         taxonomy_json = json.dumps(dict(taxonomy or {}))  # full-replace: omitted -> {} -> no taxonomy
         cm = classifier_model or None  # full-replace: omitted -> NULL -> gateway default classifier
+        steer_int = int(bool(optimizer_steers_tools))  # full-replace: omitted -> 0 -> bindings govern
         await self._exec(
             "INSERT INTO routing_policies (team_id, org_id, bindings, optimize, custom_labels, prewarm, "
-            "stick_ttls, cache, fail_policy, taxonomy, classifier_model, version, updated_by, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?) "
+            "stick_ttls, cache, fail_policy, taxonomy, classifier_model, optimizer_steers_tools, "
+            "version, updated_by, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?) "
             "ON CONFLICT (team_id) DO UPDATE SET org_id=excluded.org_id, bindings=excluded.bindings, "
             "optimize=excluded.optimize, custom_labels=excluded.custom_labels, "
             "prewarm=excluded.prewarm, stick_ttls=excluded.stick_ttls, cache=excluded.cache, "
             "fail_policy=excluded.fail_policy, taxonomy=excluded.taxonomy, "
             "classifier_model=excluded.classifier_model, "
+            "optimizer_steers_tools=excluded.optimizer_steers_tools, "
             "version=routing_policies.version+1, "
             "updated_by=excluded.updated_by, updated_at=excluded.updated_at",
             (team_id, org_id, bindings_json, optimize, custom_json, prewarm_int, stick_json,
-             cache_json, fp, taxonomy_json, cm, updated_by, time.time()),
+             cache_json, fp, taxonomy_json, cm, steer_int, updated_by, time.time()),
         )
         return await self.get_routing_policy(team_id)
 

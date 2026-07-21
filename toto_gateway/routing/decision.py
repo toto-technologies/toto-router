@@ -67,6 +67,8 @@ def effective_policy(identity=None, default: Policy | None = None) -> Policy | N
         # W3-C1 pluggable classifier: the org's chosen classify model (repair pre-rename ids at read).
         cm = routing_blob.get("classifier_model")
         pol.classifier_model = normalize_legacy_id(cm) if cm else None
+        # Binding-precedence escape hatch: absent → False (bindings govern tool traffic).
+        pol.optimizer_steers_tools = bool(routing_blob.get("optimizer_steers_tools"))
     return pol
 
 

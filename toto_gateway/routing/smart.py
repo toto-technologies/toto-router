@@ -397,21 +397,45 @@ def _vocab(labels, policy) -> dict:
     return v
 
 
-def _bound(label, catalog, labels, policy, require_tools: bool = False):
-    """(entry, origin) for a classified label via the ladder, or (None, '') if unbound.
-    Team binding / custom-label model (control-plane C6/CT) beats the global labels.yaml default;
-    a stale id absent from the catalog — or one that can't satisfy require_tools — falls
-    through."""
+def _binding_entry(label, catalog, labels, policy):
+    """(entry, origin) for the model a HUMAN bound to `label` — a team/org override or custom task
+    type (control-plane C6/CT) first, else the shipped labels.yaml default — resolved through the
+    catalog, IGNORING tools capability. (None, '') when the label is unbound anywhere ('other'/
+    'redact' with model: null, or a binding whose model left the catalog). The tools guard runs in
+    the caller AFTER this, so an EXPLICIT binding governs ALL traffic for the label, tools or not —
+    the optimizer never silently overrides it."""
     if policy is not None:
         team_id = (policy.label_bindings or {}).get(label)
         if not team_id:
             team_id = next((c.get("model") for c in (policy.custom_labels or [])
                             if c.get("name") == label and c.get("model")), None)
         team = catalog.get(team_id or "")
-        if _tools_ok(team, require_tools):
+        if team is not None:
             return team, ":team"
     entry = catalog.get(labels.model_for(label) or "")
-    return (entry, "") if _tools_ok(entry, require_tools) else (None, "")
+    return (entry, "") if entry is not None else (None, "")
+
+
+def benchmark_pick_for(label, catalog, labels, benchmarks, policy, require_tools: bool = False):
+    """What benchmark_best WOULD pick for `label`'s category — the optimizer's advice. Computed even
+    when an explicit binding governs, so the trace/console can surface 'benchmark pick: <model>'.
+    None when the label declares no benchmark category or the data can't decide. require_tools
+    filters the candidate pool so the advice never names a model the request couldn't use."""
+    cat = labels.category_for(label)
+    if not cat or benchmarks is None:
+        return None
+    optimize = getattr(policy, "optimize", None) or "balanced"
+    real = [e for e in catalog.models if e.endpoint != "fake" and _tools_ok(e, require_tools)]
+    pick = benchmarks.best(real, cat, optimize)
+    return pick.id if pick is not None else None
+
+
+def _with_bench(meta, chosen_id, bench_pick):
+    """Record the optimizer's advice in label_metadata['benchmark_pick'] when it differs from the
+    chosen (bound) model — the advisor hint the trace/console reads. Same model → unchanged."""
+    if bench_pick and bench_pick != chosen_id:
+        return {**(meta or {}), "benchmark_pick": bench_pick}
+    return meta
 
 
 def _warm_hold(result: SmartResult, *, catalog, conversation_key: str | None,
@@ -532,28 +556,44 @@ async def smart_route(text, *, catalog, labels, benchmarks, classifier_model, po
     if label is None:  # classifier down/absent or unparseable -> benchmark default
         return SmartResult(fallback_model(catalog, benchmarks, policy, require_tools, labels=labels),
                            "smart:classify_failed", None, classify_ms, data_label=data_label)
-    entry, origin = _bound(label, catalog, labels, policy, require_tools)
-    bound = entry is not None
+    entry, origin = _binding_entry(label, catalog, labels, policy)
+    # The optimizer's advice for this label, computed regardless of binding (advisor, not authority).
+    bench_pick = benchmark_pick_for(label, catalog, labels, benchmarks, policy, require_tools)
     if entry is not None:
-        result = SmartResult(entry.id, f"label:{label}{origin}", label, classify_ms, meta,
-                             data_label=data_label)
+        # BOUND — a human bound this label. The binding governs ALL traffic (tools or not); the
+        # optimizer is demoted to an advisor (bench_pick, recorded when it differs). Precedence:
+        # bindings beat benchmark_best.
+        bound = True
+        meta = _with_bench(meta, entry.id, bench_pick)
+        if _tools_ok(entry, require_tools):
+            result = SmartResult(entry.id, f"label:{label}{origin}", label, classify_ms, meta,
+                                 data_label=data_label)
+        elif getattr(policy, "optimizer_steers_tools", False) and bench_pick:
+            # Escape hatch (default off): the optimizer may steer tool traffic off a non-tool
+            # binding to the benchmark best — the pre-precedence behavior, restored per policy.
+            bound = False  # a benchmark pick can drift turn-to-turn; let warmth damp it, as before
+            result = SmartResult(bench_pick,
+                                 f"label:{label}:benchmark_best:{labels.category_for(label)}",
+                                 label, classify_ms, meta, data_label=data_label)
+        else:
+            # Tools guard: the bound model can't speak native tools. Do NOT silently benchmark-route
+            # — the binding stands as intent; pick a tools-capable fallback and record the guard so
+            # Activity shows the binding was displaced by the guard, not by the optimizer.
+            result = SmartResult(fallback_model(catalog, benchmarks, policy, require_tools, labels=labels),
+                                 f"label:{label}:tools_guard", label, classify_ms, meta,
+                                 data_label=data_label)
     else:
-        # Classified but unbound (a real task label whose binding was cleared, or 'other'/'redact').
-        # Prefer the team's explicit 'other' catch-all; else route benchmark-best on the label's
-        # CATEGORY — task-type-specific routing from real benchmark data — instead of generic
-        # 'general'; else the generic default. Keep the classification so the client still sees
-        # classified_as.
-        result = None
+        # UNBOUND — no human binding (a cleared binding, or 'other'/'redact'). This is the ONLY path
+        # benchmark_best now governs. Prefer the team's explicit 'other' catch-all; else route
+        # benchmark-best on the label's CATEGORY; else the generic fallback. Keep the classification
+        # so the client still sees classified_as.
+        bound = False
         other = (getattr(policy, "label_bindings", None) or {}).get("other")
         cat = labels.category_for(label)
-        if cat and not (other and _tools_ok(catalog.get(other), require_tools)):
-            optimize = getattr(policy, "optimize", None) or "balanced"
-            real = [e for e in catalog.models if e.endpoint != "fake" and _tools_ok(e, require_tools)]
-            pick = benchmarks.best(real, cat, optimize)
-            if pick is not None:
-                result = SmartResult(pick.id, f"label:{label}:benchmark_best:{cat}", label,
-                                     classify_ms, meta, data_label=data_label)
-        if result is None:
+        if bench_pick and cat and not (other and _tools_ok(catalog.get(other), require_tools)):
+            result = SmartResult(bench_pick, f"label:{label}:benchmark_best:{cat}", label,
+                                 classify_ms, meta, data_label=data_label)
+        else:
             result = SmartResult(fallback_model(catalog, benchmarks, policy, require_tools, labels=labels),
                                  f"label:{label}:fallback", label, classify_ms, meta,
                                  data_label=data_label)

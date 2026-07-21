@@ -138,6 +138,9 @@
 
   // ---- Editable local state (seeded from the resolved policies) ------------------------------
   let optimize = $state('balanced');
+  // Binding precedence escape hatch (default off): a bound label governs tool traffic even when its
+  // model can't do tools (the tools guard handles that). On restores the old benchmark override.
+  let optimizerSteersTools = $state(false);
   // org-only per-reason matrix: reason -> 'open'|'closed'. A scalar from the API expands to all-same;
   // it collapses back to a scalar on save when the rows agree (round-trip compat with the API default).
   let failMatrix = $state({ classify_failed: 'open', breaker_open: 'open', policy_error: 'open' });
@@ -240,6 +243,7 @@
     // selected TEAM's policy after a Team → Org switch (its allow/deny must not gate org routing).
     const cp = isOrg ? null : catalogQ.data;
     optimize = rp?.optimize ?? 'balanced';
+    optimizerSteersTools = rp?.optimizer_steers_tools ?? false;
     failMatrix = toFailMatrix(rp?.fail_policy);
     classifierModel = rp?.classifier_model ?? '';
     const sel = {};
@@ -375,6 +379,7 @@
     // the PUT full-replaces, so send them through unchanged or a routing Save wipes them.
     return {
       bindings, optimize, custom_labels, stick_ttls,
+      optimizer_steers_tools: optimizerSteersTools,
       prewarm: !!routingQ.data?.prewarm,
       cache: { ...(routingQ.data?.cache ?? {}) },
       // full-replace: the org toggle sends its edited value; a team save (no UI for it) passes the
@@ -824,6 +829,11 @@
                         <button class="resetdf" title="Reset to default ({prettyId(row.default_model)})" onclick={() => resetRow(row)}>↺</button>
                       {/if}
                     </div>
+                    {#if row.benchmark_pick}
+                      <div class="benchhint" title="The optimizer's benchmark-best pick for this task type. Your binding governs — this is advisory.">
+                        benchmark pick: {prettyId(row.benchmark_pick)}
+                      </div>
+                    {/if}
                   </td>
                   <td>
                     <select
@@ -885,6 +895,17 @@
               <SegmentedControl options={FAIL_OPTS} bind:value={failMatrix[r.key]} />
             </div>
           {/each}
+          <div class="failrow">
+            <div class="failwhat">
+              <b>Let the optimizer override tool-request bindings</b>
+              <span class="exp">Off (default), a bound task type keeps your model for every request; a
+                tool call it can't run falls back to a tool-capable model. On restores benchmark-best routing
+                for those tool calls.</span>
+            </div>
+            <SegmentedControl
+              options={[{ value: false, label: 'Off' }, { value: true, label: 'On' }]}
+              bind:value={optimizerSteersTools} />
+          </div>
         </div>
 
         <!-- Pluggable classifier: which model reads each prompt to route it. -->
@@ -1498,6 +1519,11 @@
   :global(.tasktable .taskdesc) {
     font-size: 0.75rem;
     max-width: 420px;
+  }
+  :global(.tasktable .benchhint) {
+    font-size: 0.6875rem;
+    color: var(--text-3);
+    margin-top: 3px;
   }
   :global(.tasktable .routesel) {
     font-size: 0.8125rem;
