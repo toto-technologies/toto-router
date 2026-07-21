@@ -230,6 +230,7 @@ export const getFireworksDiscovery = () => get('/v1/admin/catalog/discovery/fire
  *  aren't both set.
  *  @returns {Promise<import('./types').FireworksDiscovery>} */
 export const getCloudflareDiscovery = () => get('/v1/admin/catalog/discovery/cloudflare');
+export const getAnthropicDiscovery = () => get('/v1/admin/catalog/discovery/anthropic');
 
 // ---- Catalog adoptions (one-click Add to Catalog, scoped to the caller's org) -----------------
 

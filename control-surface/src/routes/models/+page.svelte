@@ -21,6 +21,7 @@
     orYaml,
     fwYaml,
     cfYaml,
+    anYaml,
     vendorFromSlug,
     vendorHue,
     catMark,
@@ -30,6 +31,7 @@
     DISCOVERY_FILTERS,
     FW_DISCOVERY_FILTERS,
     CF_DISCOVERY_FILTERS,
+    AN_DISCOVERY_FILTERS,
     ALL_DISCOVERY_FILTERS,
     kindLabel,
     customModelRows,
@@ -41,6 +43,7 @@
     getOpenRouterDiscovery,
     getFireworksDiscovery,
     getCloudflareDiscovery,
+    getAnthropicDiscovery,
     getCatalogModels,
     getFireworksSync,
     createAdoption,
@@ -64,6 +67,7 @@
   const orQ = query(() => getOpenRouterDiscovery(), { isEmpty: () => false });
   const fwQ = query(() => getFireworksDiscovery(), { isEmpty: () => false });
   const cfQ = query(() => getCloudflareDiscovery(), { isEmpty: () => false });
+  const anQ = query(() => getAnthropicDiscovery(), { isEmpty: () => false });
   const catQ = query(() => getCatalogModels(), { isEmpty: (d) => !d?.models?.length });
   const syncQ = query(() => getFireworksSync(), { isEmpty: () => false });
   // caller-scope adoptions — the "added by you" join; a failure just means no markers
@@ -101,6 +105,7 @@
     orQ.reload();
     fwQ.reload();
     cfQ.reload();
+    anQ.reload();
     syncQ.reload();
   }
 
@@ -112,7 +117,7 @@
   let busyKeys = $state({}); // adoptionKey → true while a call is in flight
   let notice = $state('');
   function reconcile(src) {
-    ({ fireworks: fwQ, cloudflare: cfQ }[src] ?? orQ).reload();
+    ({ fireworks: fwQ, cloudflare: cfQ, anthropic: anQ }[src] ?? orQ).reload();
     catQ.reload();
     adoptQ.reload();
   }
@@ -171,9 +176,10 @@
   const orModels = $derived(orQ.data?.models ?? []);
   const fwModels = $derived(fwQ.data?.models ?? []);
   const cfModels = $derived(cfQ.data?.models ?? []);
+  const anModels = $derived(anQ.data?.models ?? []);
   const merged = $derived(
     withAdoptions(
-      mergeDiscovery(orModels, fwModels, cfModels),
+      mergeDiscovery(orModels, fwModels, cfModels, anModels),
       adoptQ.data?.adoptions?.map((a) => a.id),
       overrides
     )
@@ -188,11 +194,14 @@
         ? FW_DISCOVERY_FILTERS
         : source === 'cloudflare'
           ? CF_DISCOVERY_FILTERS
-          : ALL_DISCOVERY_FILTERS
+          : source === 'anthropic'
+            ? AN_DISCOVERY_FILTERS
+            : ALL_DISCOVERY_FILTERS
   );
   const catalogedCount = $derived(merged.filter((m) => m.cataloged).length);
   const libLoading = $derived(
-    orQ.status === 'loading' && fwQ.status === 'loading' && cfQ.status === 'loading'
+    orQ.status === 'loading' && fwQ.status === 'loading' && cfQ.status === 'loading' &&
+    anQ.status === 'loading'
   );
   const libFresh = $derived(syncFreshness(orQ.data) || syncFreshness(fwQ.data) || syncFreshness(cfQ.data));
   // per-source health lives on the source tab itself: a short state in the chip, the full
@@ -214,6 +223,12 @@
         : cfQ.status === 'error' || cfQ.data?.error
           ? { short: 'offline', title: 'Cloudflare didn’t answer', msg: 'The gateway couldn’t reach Cloudflare. Check connectivity, then Refresh sources.' }
           : null,
+    anthropic:
+      anQ.data && !anQ.data.key_present
+        ? { short: 'no key', title: 'Anthropic isn’t connected', msg: 'Set ANTHROPIC_API_KEY on the gateway — or paste it in Settings → Provider connections — to browse Anthropic models here.' }
+        : anQ.status === 'error' || anQ.data?.error
+          ? { short: 'offline', title: 'Anthropic didn’t answer', msg: 'The gateway couldn’t reach Anthropic. Check connectivity, then Refresh sources.' }
+          : null,
   });
   const selectedDegraded = $derived(source !== 'all' ? sourceState[source] : null);
   // provenance facts get their own quiet line under the counts instead of one crammed sentence
@@ -232,8 +247,8 @@
   // ---- Selecting a Model (details drawer as a page section) ------------------------------------
   let selected = $state(null); // {m, fw, id, yaml} — the details surface, no longer the adopt path
   let copied = $state(false);
-  const PREFIX_FOR = { openrouter: 'or', fireworks: 'fw', cloudflare: 'cf' };
-  const YAML_FOR = { openrouter: orYaml, fireworks: fwYaml, cloudflare: cfYaml };
+  const PREFIX_FOR = { openrouter: 'or', fireworks: 'fw', cloudflare: 'cf', anthropic: 'an' };
+  const YAML_FOR = { openrouter: orYaml, fireworks: fwYaml, cloudflare: cfYaml, anthropic: anYaml };
   async function showDetails(m) {
     const id = suggestedId(m.slug, catalogIds, PREFIX_FOR[m.source] ?? 'or');
     selected = { m, source: m.source, id, yaml: (YAML_FOR[m.source] ?? orYaml)(m, id) };
@@ -295,7 +310,7 @@
       aria-label="Search the model library"
     />
     <div class="seg" role="tablist" aria-label="Source">
-      {#each [['all', 'All sources', null], ['openrouter', 'OpenRouter', orModels.length], ['fireworks', 'Fireworks', fwModels.length], ['cloudflare', 'Cloudflare', cfModels.length]] as [key, label, count] (key)}
+      {#each [['all', 'All sources', null], ['openrouter', 'OpenRouter', orModels.length], ['fireworks', 'Fireworks', fwModels.length], ['cloudflare', 'Cloudflare', cfModels.length], ['anthropic', 'Anthropic', anModels.length]] as [key, label, count] (key)}
         <button class:on={source === key} aria-pressed={source === key} onclick={() => (source = key)}>
           {label}{#if sourceState[key]}&nbsp;· <span class="st">{sourceState[key].short}</span>{:else if count != null}&nbsp;· {count}{/if}
         </button>

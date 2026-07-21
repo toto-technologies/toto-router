@@ -98,6 +98,13 @@ def provider_env_map(provider: str, plaintext: str) -> dict[str, str]:
     return {definition.api_key_env: plaintext}
 
 
+def stored_or_env(env: str) -> str | None:
+    """The effective secret for `env`: the request-scoped stored-key overlay first (require_auth →
+    load_byok → byok_keys), then the process env — the same stored-beats-env order dispatch uses,
+    so a key pasted in Settings works on the very next request without a restart."""
+    return byok_keys.get().get(env) or os.environ.get(env) or None
+
+
 def expand_env_refs(text: str) -> str:
     """${ENV} interpolation with stored credentials first: the request-scoped byok_keys overlay
     (e.g. a stored Cloudflare account id) wins over os.environ; anything left falls through to
