@@ -281,6 +281,91 @@ def reconcile_fireworks_library(entries: list[CatalogEntry], models: list[dict])
     return sorted(models, key=lambda m: m["slug"])
 
 
+# --- Cloudflare Workers AI library discovery -------------------------------------------------
+
+CF_API = "https://api.cloudflare.com/client/v4"
+
+
+def _cf_prop(props: Any, key: str) -> str | None:
+    """Value of the {property_id, value} entry named `key` in a Cloudflare model's `properties`
+    list (Cloudflare's model-catalog shape), or None. Tolerates a missing/oddly-shaped list."""
+    if not isinstance(props, list):
+        return None
+    for p in props:
+        if isinstance(p, dict) and p.get("property_id") == key:
+            return p.get("value")
+    return None
+
+
+def map_cloudflare_model(m: dict) -> dict | None:
+    """One Cloudflare Workers AI models/search entry → our lean shape (cataloged/catalog_id filled by
+    reconcile). Returns None for a non-text-generation entry. Cloudflare's models API exposes no
+    per-token price (pricing lives on a separate page), so price_in/out are 0 — same as the Fireworks
+    library; an admin refines the price after adopting.
+    ponytail: the properties shape (a list of {property_id, value}) follows Cloudflare's model-catalog
+    docs but is not verified against a live account in this build — a shape drift just yields ctx 0 /
+    tools False, never a crash (the fields default)."""
+    task = ((m.get("task") or {}).get("name") or "").lower()
+    if task and task != "text generation":
+        return None
+    slug = m.get("name", "")
+    if not slug:
+        return None
+    props = m.get("properties")
+    try:
+        ctx = int(_cf_prop(props, "context_window") or 0)
+    except (TypeError, ValueError):
+        ctx = 0
+    return {"slug": slug, "name": slug.rstrip("/").split("/")[-1],
+            "context_window": ctx, "price_in": 0.0, "price_out": 0.0,
+            "tools": str(_cf_prop(props, "function_calling") or "").lower() == "true",
+            "vision": str(_cf_prop(props, "vision") or "").lower() == "true",
+            "cataloged": False, "catalog_id": None}
+
+
+async def fetch_cloudflare_library(api_token: str, account_id: str) -> dict:
+    """List the Cloudflare Workers AI text-generation model catalog for `account_id`. Needs BOTH the
+    token and the account id (the two-part credential). Returns {models, filtered_out, error}; hidden
+    (non-text-generation) entries are counted in filtered_out. Never raises — HTTP failure → error
+    set, models empty."""
+    models, filtered_out, error = [], 0, None
+    url = f"{CF_API}/accounts/{account_id}/ai/models/search"
+    try:
+        async with httpx.AsyncClient(timeout=30,
+                                     headers={"Authorization": f"Bearer {api_token}"}) as client:
+            page = 1
+            while True:
+                resp = await client.get(url, params={"task": "Text Generation",
+                                                     "page": page, "per_page": 100})
+                resp.raise_for_status()
+                body = resp.json()
+                for raw in body.get("result") or []:
+                    row = map_cloudflare_model(raw)
+                    if row is None:
+                        filtered_out += 1
+                    else:
+                        models.append(row)
+                info = body.get("result_info") or {}
+                total_pages = info.get("total_pages")
+                if not total_pages or page >= total_pages:
+                    break
+                page += 1
+    except httpx.HTTPError as e:
+        return {"models": [], "filtered_out": 0, "error": f"cloudflare API error: {e}"}
+    return {"models": models, "filtered_out": filtered_out, "error": error}
+
+
+def reconcile_cloudflare_library(entries: list[CatalogEntry], models: list[dict]) -> list[dict]:
+    """Mark each library model cataloged/catalog_id — a cloudflare catalog entry whose
+    effective_upstream_model == slug (the `@cf/...` id). Sorted by slug. Mutates in place."""
+    by_slug = {e.effective_upstream_model: e.id
+               for e in entries if _provider_of(e) == "cloudflare"}
+    for m in models:
+        m["catalog_id"] = by_slug.get(m["slug"])
+        m["cataloged"] = m["catalog_id"] is not None
+    return sorted(models, key=lambda m: m["slug"])
+
+
 # --- availability probe (static provider entries) --------------------------------------------
 #
 # Every OpenAI-compatible provider serves GET {base_url}/models (ids only, no pricing). The

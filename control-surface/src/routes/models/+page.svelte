@@ -20,6 +20,7 @@
     suggestedId,
     orYaml,
     fwYaml,
+    cfYaml,
     vendorFromSlug,
     vendorHue,
     catMark,
@@ -28,6 +29,7 @@
     filterDiscovery,
     DISCOVERY_FILTERS,
     FW_DISCOVERY_FILTERS,
+    CF_DISCOVERY_FILTERS,
     ALL_DISCOVERY_FILTERS,
     kindLabel,
     customModelRows,
@@ -38,6 +40,7 @@
   import {
     getOpenRouterDiscovery,
     getFireworksDiscovery,
+    getCloudflareDiscovery,
     getCatalogModels,
     getFireworksSync,
     createAdoption,
@@ -60,6 +63,7 @@
   // ---- queries — this page is ABOUT the library, so both sources fetch on mount --------------
   const orQ = query(() => getOpenRouterDiscovery(), { isEmpty: () => false });
   const fwQ = query(() => getFireworksDiscovery(), { isEmpty: () => false });
+  const cfQ = query(() => getCloudflareDiscovery(), { isEmpty: () => false });
   const catQ = query(() => getCatalogModels(), { isEmpty: (d) => !d?.models?.length });
   const syncQ = query(() => getFireworksSync(), { isEmpty: () => false });
   // caller-scope adoptions — the "added by you" join; a failure just means no markers
@@ -96,6 +100,7 @@
   function refreshSources() {
     orQ.reload();
     fwQ.reload();
+    cfQ.reload();
     syncQ.reload();
   }
 
@@ -107,7 +112,7 @@
   let busyKeys = $state({}); // adoptionKey → true while a call is in flight
   let notice = $state('');
   function reconcile(src) {
-    (src === 'fireworks' ? fwQ : orQ).reload();
+    ({ fireworks: fwQ, cloudflare: cfQ }[src] ?? orQ).reload();
     catQ.reload();
     adoptQ.reload();
   }
@@ -165,9 +170,10 @@
   }
   const orModels = $derived(orQ.data?.models ?? []);
   const fwModels = $derived(fwQ.data?.models ?? []);
+  const cfModels = $derived(cfQ.data?.models ?? []);
   const merged = $derived(
     withAdoptions(
-      mergeDiscovery(orModels, fwModels),
+      mergeDiscovery(orModels, fwModels, cfModels),
       adoptQ.data?.adoptions?.map((a) => a.id),
       overrides
     )
@@ -176,11 +182,19 @@
   const filtered = $derived(filterDiscovery(pool, search, filters));
   const shown = $derived(filtered.slice(0, LIB_CAP));
   const filterDefs = $derived(
-    source === 'openrouter' ? DISCOVERY_FILTERS : source === 'fireworks' ? FW_DISCOVERY_FILTERS : ALL_DISCOVERY_FILTERS
+    source === 'openrouter'
+      ? DISCOVERY_FILTERS
+      : source === 'fireworks'
+        ? FW_DISCOVERY_FILTERS
+        : source === 'cloudflare'
+          ? CF_DISCOVERY_FILTERS
+          : ALL_DISCOVERY_FILTERS
   );
   const catalogedCount = $derived(merged.filter((m) => m.cataloged).length);
-  const libLoading = $derived(orQ.status === 'loading' && fwQ.status === 'loading');
-  const libFresh = $derived(syncFreshness(orQ.data) || syncFreshness(fwQ.data));
+  const libLoading = $derived(
+    orQ.status === 'loading' && fwQ.status === 'loading' && cfQ.status === 'loading'
+  );
+  const libFresh = $derived(syncFreshness(orQ.data) || syncFreshness(fwQ.data) || syncFreshness(cfQ.data));
   // one honest line per degraded source, appended to the count line
   const sourceNotes = $derived(
     [
@@ -190,6 +204,11 @@
         : fwQ.data && !fwQ.data.key_present
           ? 'set FIREWORKS_API_KEY to browse Fireworks'
           : null,
+      cfQ.data && !cfQ.data.key_present
+        ? 'set CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID to browse Cloudflare'
+        : cfQ.status === 'error' || cfQ.data?.error
+          ? 'Cloudflare didn’t answer'
+          : null,
     ].filter(Boolean)
   );
   const routing = $derived(routingQ.status === 'ok' ? routingQ.data : null);
@@ -198,10 +217,11 @@
   // ---- Selecting a Model (details drawer as a page section) ------------------------------------
   let selected = $state(null); // {m, fw, id, yaml} — the details surface, no longer the adopt path
   let copied = $state(false);
+  const PREFIX_FOR = { openrouter: 'or', fireworks: 'fw', cloudflare: 'cf' };
+  const YAML_FOR = { openrouter: orYaml, fireworks: fwYaml, cloudflare: cfYaml };
   async function showDetails(m) {
-    const fw = m.source === 'fireworks';
-    const id = suggestedId(m.slug, catalogIds, fw ? 'fw' : 'or');
-    selected = { m, fw, id, yaml: fw ? fwYaml(m, id) : orYaml(m, id) };
+    const id = suggestedId(m.slug, catalogIds, PREFIX_FOR[m.source] ?? 'or');
+    selected = { m, source: m.source, id, yaml: (YAML_FOR[m.source] ?? orYaml)(m, id) };
     copied = false;
     await tick();
     document.getElementById('adopt')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -261,7 +281,7 @@
       aria-label="Search the model library"
     />
     <div class="seg" role="tablist" aria-label="Source">
-      {#each [['all', `All sources`], ['openrouter', `OpenRouter · ${orModels.length}`], ['fireworks', `Fireworks · ${fwModels.length}`]] as [key, label] (key)}
+      {#each [['all', `All sources`], ['openrouter', `OpenRouter · ${orModels.length}`], ['fireworks', `Fireworks · ${fwModels.length}`], ['cloudflare', `Cloudflare · ${cfModels.length}`]] as [key, label] (key)}
         <button class:on={source === key} aria-pressed={source === key} onclick={() => (source = key)}>{label}</button>
       {/each}
     </div>
@@ -411,7 +431,7 @@
         {#if sm.cataloged}
           <dt>Catalog id</dt><dd class="n">{sm.catalog_id ?? selected.id}</dd>
         {/if}
-        {#if !selected.fw}
+        {#if selected.source === 'openrouter'}
           <dt>Price</dt><dd>{perM(sm.price_in)} in · {perM(sm.price_out)} out per M tokens</dd>
         {/if}
         <dt>Context</dt><dd>{sm.context_window != null ? `${sm.context_window.toLocaleString()} tokens` : '—'}</dd>
@@ -445,12 +465,12 @@
         <summary>Advanced: config entry</summary>
         <p class="advnote">
           Prefer the file workflow? The same model as a
-          catalog.{selected.fw ? 'fireworks' : 'openrouter'}.yaml entry — pinned at deploy time,
+          catalog.{selected.source}.yaml entry — pinned at deploy time,
           with the id ↔ upstream pair locked in <span class="n">tests/test_catalog.py</span>.
         </p>
         <div class="yamlbox">
           <button class="copybtn" onclick={copyYaml}>{copied ? 'Copied ✓' : 'Copy YAML'}</button>
-          <pre class="n"># append to catalog.{selected.fw ? 'fireworks' : 'openrouter'}.yaml, then redeploy
+          <pre class="n"># append to catalog.{selected.source}.yaml, then redeploy
 {selected.yaml}</pre>
         </div>
       </details>
