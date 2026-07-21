@@ -14,12 +14,16 @@
 
   const keys = query(() => get('/v1/admin/provider-keys'));
   const rows = $derived(keys.data?.providers ?? []);
+  // catalog_defaulted → a saved key recomposes the catalog live (its models appear with no restart).
+  // false = the operator pinned TOTO_GW_CATALOG, so adding a provider means editing that env var.
+  const catalogDefaulted = $derived(keys.data?.catalog_defaulted ?? true);
 
   let editing = $state('');       // provider slug whose paste field is open ('' = none)
   let keyDraft = $state('');
   let accountDraft = $state('');
   let saving = $state(false);
   let saveError = $state('');
+  let saveNote = $state('');      // transient success line after a save recomposes the catalog
   let confirmRemove = $state(''); // provider slug armed for the confirming second Remove click
 
   function openEdit(row) {
@@ -27,6 +31,7 @@
     keyDraft = '';
     accountDraft = '';
     saveError = '';
+    saveNote = '';
     confirmRemove = '';
   }
 
@@ -48,8 +53,12 @@
     saving = true;
     saveError = '';
     try {
-      await put(`/v1/admin/provider-keys/${row.provider}`, { key, account_id: account });
+      const res = await put(`/v1/admin/provider-keys/${row.provider}`, { key, account_id: account });
       closeEdit();
+      const n = res?.models_added?.length ?? 0;
+      saveNote = n
+        ? `${row.label} connected — ${n} model${n === 1 ? '' : 's'} added to your catalog.`
+        : `${row.label} connected.`;
       await keys.reload();
     } catch (e) {
       saveError = e?.status === 503
@@ -78,7 +87,12 @@
 <Card title="Provider connections">
   <p class="hint">Connect the model providers you have accounts with. Keys are encrypted before
     they're stored and never shown again — only the last 4 characters are kept so you can
-    recognize them. A pasted key takes effect immediately, no restart needed.</p>
+    recognize them. {#if catalogDefaulted}A pasted key takes effect immediately — its models join
+    your catalog with no restart.{:else}A pasted key authenticates immediately, but your gateway
+    pins an explicit catalog (<code class="mono">TOTO_GW_CATALOG</code>) — edit that variable to add
+    a provider's models.{/if}</p>
+
+  {#if saveNote}<div class="notew ok" in:revealIn><span>{saveNote}</span></div>{/if}
 
   {#if keys.status === 'loading'}
     <div class="skrows"><Skeleton height="16px" /><Skeleton height="16px" width="70%" /></div>
@@ -183,6 +197,7 @@
   .pchint { color: var(--muted); font-size: 13px; }
   .envnote { color: var(--muted); font-size: 13px; }
   .envnote code { font-size: 12px; }
+  .notew.ok { color: var(--good, #1a7f37); }
   .pcedit { margin-top: 10px; }
   .pcfields {
     display: flex;

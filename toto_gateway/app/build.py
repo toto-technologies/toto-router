@@ -9,6 +9,7 @@ import logging
 
 from ..catalog import Catalog
 from ..config import Settings
+from ..credentials import compose_default_catalog
 from ..gateway import Gateway
 from ..obs import request_id_var
 from ..runners.registry import RunnerRegistry
@@ -129,6 +130,48 @@ def _build_labels(settings: Settings, catalog):
             "Cause: %s. To fix: %s.", "; ".join(errs), hint)
         return None
     return labels
+
+
+def recompose_catalog(gateway, settings: Settings, providers, *,
+                      driver=None) -> tuple[bool, list[str], list[str]]:
+    """Rebuild + swap the running catalog (and its label bindings) for the current keyed-provider
+    set — the live equivalent of the boot-time default-catalog compose. No-op unless the catalog was
+    DEFAULTED (an explicit TOTO_GW_CATALOG is the operator's override, never touched) or unless the
+    composed path actually changes.
+
+    Reference-holder audit: the gateway reads self.catalog fresh per request (catalog_for), but the
+    DRIVER plane captured its OWN catalog/labels/knn references at build (driver.core: self.catalog,
+    self._labels, self._knn._catalog). Both planes must move together, so every holder is reassigned
+    here. Each assignment is atomic under the GIL; a request in flight keeps whatever Catalog it
+    already captured and finishes consistently. Labels are re-validated the same way boot does —
+    adding a key only adds ids (bindings stay live); removing one can orphan a binding, which
+    _build_labels soft-disables with its actionable log, never crashing.
+
+    Overlay was rejected: provider fragments are platform-wide, not per-identity, so riding the
+    per-request adoption overlay (effective_catalog) would re-merge them on EVERY request forever —
+    a permanent hot-path cost to avoid a rare multi-assignment on key change.
+
+    Returns (changed, added_ids, removed_ids)."""
+    if not settings._catalog_defaulted:
+        return False, [], []
+    new_path = compose_default_catalog(providers)
+    if new_path == settings.catalog:
+        return False, [], []
+    old_ids = {e.id for e in gateway.catalog.models}
+    new_catalog = Catalog.load(new_path)
+    new_labels = _build_labels(settings, new_catalog)
+    new_ids = {e.id for e in new_catalog.models}
+    settings.catalog = new_path            # keep settings truthful (the GET reports it)
+    for holder in (gateway, driver):       # both planes' captured references move together
+        if holder is None:
+            continue
+        holder._labels = new_labels        # labels first, then the catalog they were validated against
+        holder.catalog = new_catalog
+    knn = getattr(driver, "_knn", None)
+    if knn is not None and hasattr(knn, "_catalog"):
+        knn._catalog = new_catalog         # the experience proposer's own reference (optional feature)
+    logging.getLogger("toto_gateway").info("catalog recomposed live → %s", new_path)
+    return True, sorted(new_ids - old_ids), sorted(old_ids - new_ids)
 
 
 def _breaker_redis(settings: Settings):

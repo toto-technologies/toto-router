@@ -51,8 +51,10 @@ def test_route_roundtrip_masking_and_source(monkeypatch):
         # PUT → stored + masked, raw key never echoed
         r = client.put("/v1/admin/provider-keys/openrouter", json={"key": "sk-or-v1-SECRET42"})  # gitleaks:allow — dummy fixture
         assert r.status_code == 200, r.text
-        assert r.json() == {"provider": "openrouter", "configured": True, "masked": "ET42",
-                            "source": "stored"}
+        body = r.json()
+        assert body["provider"] == "openrouter" and body["configured"] is True
+        assert body["masked"] == "ET42" and body["source"] == "stored"
+        assert isinstance(body["models_added"], list)  # live-recompose outcome (may be empty)
         assert "sk-or-v1-SECRET42" not in r.text
 
         # a stored key over an env key: stored wins (source flips to stored)

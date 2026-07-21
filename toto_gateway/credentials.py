@@ -351,6 +351,38 @@ def stored_org_key_providers(settings, org_id: str) -> set[str]:
         return set()
 
 
+# Providers whose shipped catalog fragment composes into the DEFAULTED catalog when their key is
+# configured. openrouter's fragment is SELF-CONTAINED (it carries the echo/test fake lanes the
+# offline demo + driver fallback need); fireworks/cloudflare are overlays that compose on top. The
+# other PROVIDERS (openai/gemini) are BYOK-only — no shipped fragment — so they never change the
+# composed set. An explicit TOTO_GW_CATALOG is the operator's override and is never composed.
+_PROVIDER_FRAGMENTS = {
+    "openrouter": "catalog.openrouter.yaml",
+    "fireworks": "catalog.fireworks.yaml",
+    "cloudflare": "catalog.cloudflare.yaml",
+}
+
+
+def compose_default_catalog(providers) -> str:
+    """The composed default-catalog path for the set of providers with a configured key. openrouter's
+    fragment is the self-contained base (echo/test lanes included); every other keyed provider
+    overlays on it, or on catalog.yaml when openrouter isn't keyed. Deterministic order (the
+    _PROVIDER_FRAGMENTS insertion order) so the composed string is stable across calls — recompose
+    compares it to decide whether anything changed."""
+    base = "catalog.openrouter.yaml" if "openrouter" in providers else "catalog.yaml"
+    overlays = [f for p, f in _PROVIDER_FRAGMENTS.items()
+                if p != "openrouter" and p in providers]
+    return ",".join([base, *overlays]) if overlays else base
+
+
+def configured_key_providers(settings, org_id: str) -> set[str]:
+    """Providers with a usable key right now — an env var set OR a stored row — the union the
+    default catalog composes from. Reuses stored_org_key_providers (the SQLite peek) plus an env
+    scan over PROVIDERS."""
+    env = {p for p, d in PROVIDERS.items() if os.environ.get(d.api_key_env, "").strip()}
+    return env | stored_org_key_providers(settings, org_id)
+
+
 # --- Provision-on-signup: the per-user Toto app key lives in the SAME encrypted vault ------------
 # It's stored in the provider_keys table under a "toto" slot, but deliberately NOT registered in
 # PROVIDERS: it's an app key, not an LLM-runner key, so it must stay out of the BYOK Settings UI

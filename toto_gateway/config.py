@@ -586,8 +586,14 @@ class Settings(BaseSettings):
         if not self.catalog:
             import os
 
-            self.catalog = ("catalog.openrouter.yaml" if os.environ.get("OPENROUTER_API_KEY")
-                            else "catalog.yaml")
+            from .credentials import PROVIDERS, compose_default_catalog
+
+            # Compose EVERY env-keyed provider's fragment (the stored-key union is added at boot by
+            # the app factory, which has the DB). No key → catalog.yaml. Lazy import: keeps this
+            # low-level module free of the credentials plane at import time.
+            env_providers = {p for p, d in PROVIDERS.items()
+                             if os.environ.get(d.api_key_env, "").strip()}
+            self.catalog = compose_default_catalog(env_providers)
             self._catalog_defaulted = True
         return self
 
