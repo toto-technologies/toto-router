@@ -21,7 +21,10 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from ..credentials import PROVIDERS, credentials_secret, encrypt, last4, pack_provider_key
+from ..app.build import recompose_catalog
+from ..credentials import (
+    PROVIDERS, configured_key_providers, credentials_secret, encrypt, last4, pack_provider_key,
+)
 from .credentials import refresh_scoped_inventory
 from .deps import Identity, require_auth
 
@@ -30,6 +33,17 @@ router = APIRouter(tags=["admin"])
 
 def _error(status: int, message: str, err_type: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": {"message": message, "type": err_type}})
+
+
+def _recompose(request: Request, org_id: str) -> tuple[bool, list[str], list[str]]:
+    """Live-recompose the default catalog for the current keyed-provider set (after the store
+    mutation). No-op on an explicit-TOTO_GW_CATALOG deploy. Returns (changed, added, removed)."""
+    settings = request.app.state.settings
+    gateway = getattr(request.app.state, "gateway", None)
+    if gateway is None:
+        return False, [], []
+    return recompose_catalog(gateway, settings, configured_key_providers(settings, org_id),
+                             driver=getattr(request.app.state, "driver", None))
 
 
 def _gate(identity: Identity) -> JSONResponse | None:
@@ -75,7 +89,10 @@ async def list_provider_keys(request: Request, identity: Identity = Depends(requ
         return err
     store = request.app.state.auth
     stored = {r["provider"]: r for r in await store.list_org_provider_keys(identity.org_id)}
-    return {"providers": [_row(slug, stored.get(slug)) for slug in PROVIDERS]}
+    # catalog_defaulted → a saved key recomposes the catalog live (models appear without a restart).
+    # False means the operator pinned TOTO_GW_CATALOG, so adding providers needs editing that env var.
+    return {"providers": [_row(slug, stored.get(slug)) for slug in PROVIDERS],
+            "catalog_defaulted": request.app.state.settings._catalog_defaulted}
 
 
 @router.put("/v1/admin/provider-keys/{provider}")
@@ -105,8 +122,9 @@ async def put_provider_key(provider: str, body: KeyBody, request: Request,
         identity.org_id, provider, encrypt(secret, pack_provider_key(provider, key, account_id)),
         last4(key))
     await refresh_scoped_inventory(request, identity, provider, org_id=identity.org_id)
+    _, added, _removed = _recompose(request, identity.org_id)
     return {"provider": provider, "configured": True, "masked": last4(key) or None,
-            "source": "stored"}
+            "source": "stored", "models_added": added}
 
 
 @router.delete("/v1/admin/provider-keys/{provider}")
@@ -118,4 +136,6 @@ async def delete_provider_key(provider: str, request: Request,
     if provider not in PROVIDERS:
         return _error(400, f"unknown provider {provider!r}", "invalid_request_error")
     await request.app.state.auth.delete_org_provider_key(identity.org_id, provider)
-    return _row(provider, None)  # post-delete state: back to environment or unconfigured
+    _, _added, removed = _recompose(request, identity.org_id)
+    # post-delete state: back to environment or unconfigured, plus which catalog ids just left
+    return {**_row(provider, None), "models_removed": removed}

@@ -48,15 +48,22 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
         #  - default catalog: a stored OpenRouter key counts as configured, so a DEFAULTED catalog
         #    pick upgrades to catalog.openrouter.yaml — this one takes effect at boot, not live,
         #    because the catalog is built once here. An explicit TOTO_GW_CATALOG is never touched.
-        from ..credentials import bootstrap_local_secret, stored_org_key_providers
+        from ..credentials import (
+            bootstrap_local_secret, compose_default_catalog, configured_key_providers,
+        )
         from ..routes.deps import OSS_LOCAL_ORG
 
         if settings.kms_provider == "env" and not settings.credentials_secret:
             settings.credentials_secret = bootstrap_local_secret(settings)
-        if settings._catalog_defaulted and settings.catalog == "catalog.yaml" \
-                and "openrouter" in stored_org_key_providers(settings, OSS_LOCAL_ORG):
-            settings.catalog = "catalog.openrouter.yaml"
-            log.info("stored openrouter key found — defaulting catalog to catalog.openrouter.yaml")
+        # Compose ALL keyed providers' fragments (env + stored), so a fresh boot with a stored
+        # Cloudflare key AND OPENROUTER_API_KEY lights up both. Only when the catalog was DEFAULTED
+        # (an explicit TOTO_GW_CATALOG stays the operator's override, untouched).
+        if settings._catalog_defaulted:
+            composed = compose_default_catalog(
+                configured_key_providers(settings, OSS_LOCAL_ORG))
+            if composed != settings.catalog:
+                settings.catalog = composed
+                log.info("stored/env provider keys → default catalog composed to %s", composed)
     if settings.kms_provider != "env":
         # Fail-closed at startup: resolve the at-rest key material NOW so a vault-unreachable /
         # missing-key deploy crashes on boot instead of 500ing writes later. env mode skips this
