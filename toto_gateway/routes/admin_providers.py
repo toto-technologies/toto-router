@@ -35,13 +35,16 @@ _C = TraceRow.__table__.c
 
 def _scope_org(identity: Identity, requested: str | None):
     """Resolve the org to report on, fail-closed (mirrors admin_usage._scope_org). A non-operator is
-    pinned to their own org; a differing `org_id` is cross-org access → 403. The operator (no home
-    org) MUST name one. Returns (org_id, error) — exactly one is set."""
+    pinned to their own org; a differing `org_id` is cross-org access → 403. The OSS operator binds
+    to the `local` sentinel org (Identity.org_id) so an org-less console call resolves there instead
+    of 400-ing; an enterprise operator (no org_id) must still name one. Returns (org_id, error) —
+    exactly one is set."""
     if identity.is_operator:
-        if not requested:
+        org = requested or identity.org_id
+        if not org:
             return None, _error(400, "operator must specify ?org_id=", "invalid_request_error",
                                 "org_id_required")
-        return requested, None
+        return org, None
     home = identity.org_id
     if home is None:
         return None, _error(403, "caller has no org", "authorization_error", "no_org")

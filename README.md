@@ -110,11 +110,7 @@ Fully offline — no secrets, no network, no GPU.
 
 ## Running this for a team
 
-This tree is the single-user gateway: your own keys, your own machine, full routing and
-provenance, free forever. Org features — shared deployments with per-user tokens, teams,
-budgets, catalog governance, SSO/SCIM, audit exports, org-level observability — are the
-hosted and enterprise product built on this same core. If your usage is becoming
-multi-person, that's the line: contact the maintainers or use the hosted offering.
+This is the single-tenant gateway; multi-tenant and organization features live in the hosted product.
 
 ## License
 

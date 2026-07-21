@@ -18,10 +18,9 @@ from ..obs import RequestContextMiddleware, init_sentry, redact_settings
 # lazy-imported behind the plane/edition gate below — the OSS export deletes those modules
 # wholesale (edition seam), so nothing here may import them at module top.
 from ..routes import (
-    admin_analytics, admin_catalog, admin_catalog_adoptions, admin_catalog_sync, admin_labeling,
-    admin_latency, admin_providers, admin_requests, admin_routing, admin_usage, auth, chat,
-    credentials, health, messages, metrics, models, prewarm, route, routing,
-    sessions, tokens,
+    admin_catalog, admin_catalog_adoptions, admin_catalog_sync, admin_providers, admin_requests,
+    admin_routing, admin_usage, auth, chat, credentials, health, messages, metrics, models,
+    prewarm, route, routing, sessions, tokens,
 )
 from .background import (
     _audit_exporter, _backfill_embeddings, _backfill_notes, _benchmark_refresher, _calsync,
@@ -419,9 +418,8 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
     plane_routers = {
         "gateway": [health, metrics, auth, tokens, models, chat, messages, prewarm, route, routing,
                     sessions, credentials,
-                    admin_analytics, admin_catalog, admin_catalog_adoptions, admin_catalog_sync,
-                    admin_labeling, admin_latency, admin_providers, admin_requests, admin_routing,
-                    admin_usage],
+                    admin_catalog, admin_catalog_adoptions, admin_catalog_sync,
+                    admin_providers, admin_requests, admin_routing, admin_usage],
     }
     # App plane (the Toto product surface). Lazy-imported behind the same gate that mounts it:
     # the OSS export deletes these modules wholesale (edition seam), so in the oss edition the app
@@ -442,13 +440,14 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
     # the modules wholesale.
     if not oss:
         from ..routes import (
-            admin_audit, admin_audit_export, admin_benchmark_platform, admin_benchmarks,
-            admin_budgets, admin_egress, admin_license, admin_observability, admin_sso,
-            admin_storage, admin_tenancy, admin_tokens, admin_tuning, admin_workmap, custom_tools,
-            org_credentials, scim,
+            admin_analytics, admin_audit, admin_audit_export, admin_benchmark_platform,
+            admin_benchmarks, admin_budgets, admin_egress, admin_labeling, admin_latency,
+            admin_license, admin_observability, admin_sso, admin_storage, admin_tenancy,
+            admin_tokens, admin_tuning, admin_workmap, custom_tools, org_credentials, scim,
         )
 
         plane_routers["gateway"] += [
+            admin_analytics, admin_labeling, admin_latency,
             custom_tools, scim, org_credentials, admin_audit, admin_audit_export,
             admin_benchmark_platform, admin_benchmarks, admin_budgets, admin_egress, admin_license,
             admin_observability, admin_sso, admin_storage, admin_tenancy, admin_tokens, admin_tuning,

@@ -28,24 +28,9 @@ export const deleteTeam = (teamId, orgId) =>
 /** @returns {Promise<import('./types').MembersResponse>} */
 export const listMembers = (orgId) => get('/v1/admin/members', { query: { org_id: orgId } });
 
-/** @returns {Promise<import('./types').Invitation>} */
-export const createInvitation = (email, role = 'member', orgId) =>
-  post('/v1/admin/invitations', { email, role, org_id: orgId });
-
 /** @returns {Promise<import('./types').InvitationsResponse>} */
 export const listInvitations = (orgId) =>
   get('/v1/admin/invitations', { query: { org_id: orgId } });
-
-/** The invited (already-signed-in) user redeems their token. */
-export const acceptInvitation = (token) =>
-  post(`/v1/admin/invitations/${token}/accept`);
-
-/** Owner-only server-side (granting admin/owner). */
-export const setMemberRole = (userId, role, orgId) =>
-  post(`/v1/admin/members/${userId}/role`, { role }, { query: { org_id: orgId } });
-
-export const removeMember = (userId, orgId) =>
-  del(`/v1/admin/members/${userId}`, { query: { org_id: orgId } });
 
 // ---- Identity -------------------------------------------------------------------------------
 
@@ -88,16 +73,6 @@ export const renameOrg = (name, orgId) =>
 // the org row, so reads piggyback on it; this only writes. Owner/admin-gated, org-scoped server-side.
 export const setZeroRetention = (on, orgId) =>
   put('/v1/admin/org/zero-retention', { zero_retention: on }, { query: { org_id: orgId } });
-
-// Content-plane retention (W3-C6): per-sink retention DAYS over user-invoked product storage
-// (documents + embeddings, explicit memory facts). 0 = keep forever, per sink. Owner/admin-gated;
-// GET is auditor-readable. `.../retention/run` triggers one sweep now and returns deleted totals.
-export const getOrgRetention = (orgId) =>
-  get('/v1/admin/org/retention', { query: { org_id: orgId } });
-export const setOrgRetention = (policy, orgId) =>
-  put('/v1/admin/org/retention', policy, { query: { org_id: orgId } });
-export const runOrgRetention = (orgId) =>
-  post('/v1/admin/org/retention/run', null, { query: { org_id: orgId } });
 
 // ---- API tokens (per-user bearer, cookie-session owned) -------------------------------------
 // toto_gateway/routes/tokens.py — a normally-logged-in user owns these; the operator token can't
@@ -165,22 +140,6 @@ export const getCatalogPolicy = (teamId, orgId) =>
 /** Full-replace. @param {import('./types').CatalogPolicyInput} policy */
 export const putCatalogPolicy = (teamId, policy, orgId) =>
   put(`/v1/admin/teams/${teamId}/catalog-policy`, policy, { query: { org_id: orgId } });
-
-// ---- Org catalog policy (W1-C3 governance: allow_all | allowlist) ---------------------------
-// toto_gateway/routes/admin_catalog.py — the ORG-DEFAULT catalog governance mode, distinct from the
-// per-team catalog policy above. allowlist = deny-by-default: only the approved `models` (plus the
-// org's catalog adoptions) resolve; anything else 403s (catalog.model_denied) before the wire. No
-// row → allow_all, version 0. PUT full-replaces: omitting `models` CLEARS the approved list, so
-// always send the current list. Scoped admin is server-pinned to their org; the operator names
-// ?org_id=. Invalid mode → 422 invalid_mode.
-
-/** @returns {Promise<import('./types').OrgCatalogPolicy>} */
-export const getOrgCatalogPolicy = (orgId) =>
-  get('/v1/admin/org/catalog-policy', { query: { org_id: orgId } });
-
-/** Full-replace. @param {import('./types').OrgCatalogPolicyInput} policy */
-export const putOrgCatalogPolicy = (policy, orgId) =>
-  put('/v1/admin/org/catalog-policy', policy, { query: { org_id: orgId } });
 
 // ---- Routing policy (per team) --------------------------------------------------------------
 
@@ -314,14 +273,6 @@ export const getTuningModels = (orgId) =>
 export const getTuningEvals = (orgId) =>
   get('/v1/admin/tuning/evals', { query: { org_id: orgId } });
 
-/** @returns {Promise<{experiments: Array<{id: string, title: string, method: string, hypothesis: string, cost_estimate: string, status: 'planned'|'running'|'done', result: string, sort_order: number, created_at: number}>}>} */
-export const getTuningExperiments = (orgId) =>
-  get('/v1/admin/tuning/experiments', { query: { org_id: orgId } });
-
-/** One model version's flat dataset→job→model chain + its eval rows (404 model_not_found). */
-export const getTuningLineage = (modelId, orgId) =>
-  get('/v1/admin/tuning/lineage', { query: { model_id: modelId, org_id: orgId } });
-
 // ---- Usage / billing ------------------------------------------------------------------------
 
 /**
@@ -347,32 +298,6 @@ export const getUsage = ({ groupBy, start, end, granularity, orgId } = {}) =>
  */
 export const exportUsage = ({ period, format = 'stripe', orgId } = {}) =>
   get('/v1/admin/usage/export', { query: { period, format, org_id: orgId } });
-
-// ---- Budgets (W2-C5) ------------------------------------------------------------------------
-
-/** Org-default + per-team monthly budgets with this month's spend and pct. */
-export const getBudgets = (orgId) => get('/v1/admin/budgets', { query: { org_id: orgId } });
-
-/**
- * Set a budget: org-default (no teamId/userId), a team budget (teamId), or a member budget (userId).
- * teamId and userId are mutually exclusive. thresholds optional (defaults 0.5/0.8/1.0).
- */
-export const putBudget = ({ teamId, userId, monthlyUsd, action, thresholds, orgId } = {}) =>
-  put('/v1/admin/budgets',
-    { team_id: teamId || undefined, user_id: userId || undefined,
-      monthly_usd: monthlyUsd, action, thresholds },
-    { query: { org_id: orgId } });
-
-/** Clear a member's cap so they re-inherit the team/org-default budget. */
-export const deleteMemberBudget = ({ userId, orgId } = {}) =>
-  del('/v1/admin/budgets', { query: { user_id: userId, org_id: orgId } });
-
-/** Same-origin href for the chargeback CSV download (cookie auth rides the request). */
-export const budgetsExportHref = ({ month, orgId } = {}) => {
-  const q = new URLSearchParams({ month });
-  if (orgId) q.set('org_id', orgId);
-  return `/v1/admin/budgets/export?${q}`;
-};
 
 /**
  * The org's caching ledger over [from, to] (unix-seconds, both optional): per-model read savings,
@@ -404,17 +329,6 @@ export const getCacheHealth = ({ from, to, granularity, orgId } = {}) =>
 export const getProviderHealth = ({ window, orgId } = {}) =>
   get('/v1/admin/providers/health', { query: { window, org_id: orgId } });
 
-/**
- * Gateway-overhead latency summary for the caller's org over the last `days` (default 7, 1..90):
- * the ms the gateway itself adds on top of the model (p50/p95 overhead), per-stage timings
- * (classify/plan/upstream avg+p95), and the fast-path share (requests that skipped classification).
- * An empty window comes back as requests:0 with null stats + share 0.0 — a real, non-error state.
- * @param {{days?: number, orgId?: string}} [opts]
- * @returns {Promise<{org_id: string, days: number, start: string, requests: number, overhead_ms: {p50: number|null, p95: number|null}, stages: Record<'classify_ms'|'plan_ms'|'upstream_ms', {avg: number|null, p95: number|null}>, fast_path: {requests: number, share: number}}>}
- */
-export const getLatencySummary = ({ days, orgId } = {}) =>
-  get('/v1/admin/latency/summary', { query: { days, org_id: orgId } });
-
 // ---- Audit ----------------------------------------------------------------------------------
 
 /**
@@ -444,68 +358,6 @@ export const getRequests = ({ from, to, model, label, user, limit = 50, offset =
  * @returns {Promise<{request: object, content_available: boolean, prompt?: Array<{role: string, content: any}>, response?: string}>}
  */
 export const getRequestDetail = (id) => get(`/v1/admin/requests/${id}`);
-
-// ---- Activity analytics (org aggregate bundle + LLM governance insights) ---------------------
-// toto_gateway/routes/admin_analytics.py. Metadata only — aggregate numbers, never content.
-
-/**
- * Activity aggregate bundle for the caller's org over [start, end) (default: last 30 days).
- * @param {{start?: string, end?: string, orgId?: string}} [opts]  ISO date strings
- * @returns {Promise<{org_id: string, start: string|null, end: string|null, totals: object, by_label: any[], by_label_day: any[], by_model: any[], by_user: any[], by_user_truncated: boolean}>}
- */
-export const getActivityAnalytics = ({ start, end, orgId } = {}) =>
-  get('/v1/admin/analytics/activity', { query: { start, end, org_id: orgId } });
-
-/**
- * LLM governance insights over the same window's AGGREGATE numbers. Server-cached ~15 min per
- * (org, window); `refresh` bypasses. Degrades, never 500s: a failure is 200 with
- * `insights: null` + an honest `error` string.
- * @param {{start?: string, end?: string, refresh?: boolean, orgId?: string}} [opts]
- * @returns {Promise<{org_id: string, model: string, generated_at: string, cached: boolean, insights: {headline: string, insights: Array<{finding: string, evidence: string}>, recommendations: string[]}|null, error: string|null}>}
- */
-export const getActivityInsights = ({ start, end, refresh, orgId } = {}) =>
-  get('/v1/admin/analytics/insights', {
-    query: { start, end, refresh: refresh ? 'true' : undefined, org_id: orgId },
-  });
-
-/**
- * Per-model drill-down: token-type split + per-task-type breakdown for ONE real upstream model.
- * `model` is the real name shown in by_model (a catalog id also resolves). Unknown/quiet models
- * return zeroed totals + empty by_label, never 404.
- * @param {{model: string, start?: string, end?: string, orgId?: string}} opts
- * @returns {Promise<{org_id: string, model: string, catalog_ids: string[], totals: object, by_label: Array<{label: string, requests: number, tokens_prompt: number, tokens_completion: number, tokens_cached: number, tokens: number, cost_usd: number, savings_usd: number, share: number}>}>}
- */
-export const getModelDrilldown = ({ model, start, end, orgId }) =>
-  get('/v1/admin/analytics/model', { query: { model, start, end, org_id: orgId } });
-
-// ---- Labeling (routing-verdict plane — the gamified routing-review page) ----------------------
-// toto_gateway/routes/admin_labeling.py. All admin-role; org_id only needed by the operator.
-
-/**
- * Recent routing decisions this judge hasn't verdicted yet, newest first.
- * @param {{orgId?: string, limit?: number}} [opts]
- * @returns {Promise<{org_id: string, queue: Array<{request_id: string, ts: number, label: string, label_desc: string|null, bound_model: string|null, model_served: string|null, query_text: string}>}>}
- */
-export const getLabelingQueue = ({ orgId, limit = 50 } = {}) =>
-  get('/v1/admin/labeling/queue', { query: { org_id: orgId, limit } });
-
-/**
- * Record a verdict (idempotent per request+judge — re-posting overwrites; that's how undo works).
- * A 'good' verdict must not carry a corrected_label; a correction must be in the label vocab.
- * @param {{requestId: string, verdict: 'good'|'bad', correctedLabel?: string|null, orgId?: string}} opts
- * @returns {Promise<{verdict: object}>}
- */
-export const postLabelVerdict = ({ requestId, verdict, correctedLabel, orgId }) =>
-  post('/v1/admin/labeling/verdict',
-    { request_id: requestId, verdict, corrected_label: correctedLabel || undefined },
-    { query: { org_id: orgId } });
-
-/**
- * Rollups for the review page: totals, today, good/bad split, per-label bad counts, judges.
- * @returns {Promise<{org_id: string, judged_total: number, judged_today: number, good: number, bad: number, bad_by_label: Record<string, number>, distinct_judges: number}>}
- */
-export const getLabelingStats = (orgId) =>
-  get('/v1/admin/labeling/stats', { query: { org_id: orgId } });
 
 // ---- Org-wide inference provider keys (BYOK) --------------------------------------------------
 // toto_gateway/routes/org_credentials.py. Org-wide runner keys (OpenRouter/Fireworks): every
@@ -570,45 +422,7 @@ export const generateScimToken = (orgId) =>
 export const revokeScimToken = (orgId) =>
   del('/v1/admin/org/scim-token', { query: { org_id: orgId } });
 
-// ---- Org audit export (W2-C4: the SIEM/compliance surface) -----------------------------------
-// toto_gateway/routes/admin_audit_export.py. Admin configures where hash-chained JSONL audit
-// batches ship (gateway store and/or a customer S3 bucket), cadence, retention. The S3 secret is
-// write-only: GET returns has_s3_secret only; PUT with an empty s3_secret keeps the stored one.
-// Batches carry the sha256/prev_sha256 hash chain an auditor verifies against. Auditor-readable.
-
-/** @returns {Promise<{org_id: string, configured: boolean, enabled: boolean, cadence_hours: number,
- *  retention_days: number, destination: 'gateway'|'s3'|'both', s3_endpoint: string, s3_bucket: string,
- *  s3_region: string, s3_access_key: string, s3_prefix: string, has_s3_secret: boolean,
- *  last_run: number|null, last_error: string|null}>} */
-export const getAuditExport = (orgId) => get('/v1/admin/org/audit-export', { query: { org_id: orgId } });
-
-/** Admin-only. Omit s3_secret to keep the stored one. 422 when an s3/both destination is incomplete
- *  or missing its secret; 503 when this deploy has no credential-encryption secret. */
-export const putAuditExport = (cfg, orgId) =>
-  put('/v1/admin/org/audit-export', cfg, { query: { org_id: orgId } });
-
-/** The hash-chain listing an auditor verifies against — each batch carries sha256 + prev_sha256 +
- *  rows + a same-origin `download` path. Newest-first per stream. `stream` optionally filters.
- *  @returns {Promise<{org_id: string, batches: Array<{stream: string, batch: number, sha256: string,
- *  prev_sha256: string, rows: number, created_at: number, object_key: string, download: string}>}>} */
-export const listAuditBatches = (orgId, stream) =>
-  get('/v1/admin/org/audit-export/batches', { query: { org_id: orgId, stream } });
-
-/** Trigger an export cycle now (admin). 404 not_configured; 502 export_failed carries the reason.
- *  @returns {Promise<object>} the run summary (per-stream batch/rows counts). */
-export const runAuditExport = (orgId) =>
-  post('/v1/admin/org/audit-export/run', {}, { query: { org_id: orgId } });
-
-// ---- Egress allowlist (W2-C6: read-only network-egress posture) -------------------------------
-// toto_gateway/routes/admin_egress.py. The host→source allowlist the gateway may reach, the
-// enforce/observe mode, and 7-day observed/blocked counts. There is NO write route by design — the
-// allowlist is derived from deploy config at startup (edit config + restart). Auditor-readable.
-
-/** @returns {Promise<{enforce: boolean, hosts: Array<{host: string, source: string}>,
- *  observed_violations: number, blocked: number}>} */
-export const getEgress = () => get('/v1/admin/egress');
-
-// ---- Org observability (provider org-admin keys + derived insights) --------------------------
+// ---- Org observability (provider org-admin keys) ---------------------------------------------
 // toto_gateway/routes/admin_observability.py. Providers here: 'anthropic' | 'openai' (org ADMIN
 // keys, distinct from the BYOK inference credentials). Keys are write-only: stored encrypted,
 // never echoed back — reads return {configured, last4, org_name} only.
@@ -628,11 +442,3 @@ export const putObservabilityKey = (provider, apiKey, orgId) =>
 /** Owner-only. @returns {Promise<{deleted: boolean}>} */
 export const deleteObservabilityKey = (provider, orgId) =>
   del(`/v1/admin/observability/keys/${provider}`, { query: { org_id: orgId } });
-
-/** The one plug-and-play read: provider-observed usage/cost/members for the window, derived into
- *  summary tiles, spend_by_day/model, top scopes/actors, members, and savings candidates.
- *  Snapshot-cached server-side (~15 min TTL) — `cache.age_seconds` says how stale.
- *  @param {{orgId?: string, days?: number}} [opts]
- *  @returns {Promise<object>} the insights payload (see docs/plans/2026-07-09-org-observability.md) */
-export const getOrgInsights = ({ orgId, days } = {}) =>
-  get('/v1/admin/observability/insights', { query: { org_id: orgId, days } });

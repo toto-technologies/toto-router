@@ -133,7 +133,8 @@ def test_cross_org_stats_never_leak(health_app):
     app.dependency_overrides.clear()
 
 
-def test_operator_must_name_an_org(health_app):
-    client, _app, _engine = health_app             # default client carries the operator bearer
-    assert client.get("/v1/admin/providers/health").status_code == 400
+def test_operator_defaults_to_local_org_in_oss(health_app):
+    client, _app, _engine = health_app             # default client carries the operator bearer; oss edition
+    # OSS: the operator is the single `local` tenant, so an org-less call resolves there (no 400).
+    assert client.get("/v1/admin/providers/health").status_code == 200
     assert client.get("/v1/admin/providers/health", params={"org_id": "o_a"}).status_code == 200

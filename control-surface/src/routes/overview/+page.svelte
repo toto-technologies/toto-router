@@ -27,9 +27,13 @@
 
   // Header spend clause + the page auth gate. W1 fetches its own grouped slice, so this flat
   // slice is a small duplicate call — fold both into a shared usage resource if it ever bothers.
+  const OSS = typeof __EDITION__ !== 'undefined' && __EDITION__ === 'oss';
+
   const usage = query(() => getUsage({ start: rangeStart(range) }));
   const me = query(() => getMe());
-  const org = query(() => getOrg());
+  // Org identity is enterprise-only; single-tenant builds skip the fetch and the layout
+  // store namespaces under the empty org key.
+  const org = query(() => getOrg(), { immediate: !OSS });
   function onRange(r) {
     range = r;
     usage.reload();
@@ -59,7 +63,7 @@
   // ---- layout store — created once org identity resolves so persistence is org-namespaced -------
   let layout = $state(null);
   $effect(() => {
-    if (!layout && org.status !== 'loading') layout = createLayout(WIDGETS, org.data?.org_id ?? '');
+    if (!layout && (OSS || org.status !== 'loading')) layout = createLayout(WIDGETS, org.data?.org_id ?? '');
   });
 
   // ---- edit mode + aria announcements ------------------------------------------------------------
