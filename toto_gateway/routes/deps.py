@@ -205,16 +205,21 @@ async def _resolve_org_allowlist(auth, org_id: str | None) -> frozenset[str] | N
 
 
 async def _resolve_routing_policy(auth, org_id: str | None, team_id: str | None) -> dict | None:
-    """The caller's routing overlay. A team member gets their TEAM policy; a teamless caller —
-    a personal-org OWNER, which is the pi / API-token common case — falls back to the ORG-DEFAULT
-    policy (stored under the org_id key), so an owner's OWN traffic actually honors the routing they
-    configure in the console. No key at all (operator/anon) → None (pure global routing). Fail-open:
-    any lookup hiccup degrades to None, never a 500 on the auth path."""
-    key = team_id or org_id
-    if auth is None or not key:
+    """The caller's routing overlay. A team member gets their TEAM policy, falling back to the
+    ORG-DEFAULT policy (stored under the org_id key) when their team has none; a teamless caller —
+    a personal-org OWNER, the pi / API-token common case — reads the org-default directly. The
+    fallback is on the ROW, not the key: a team with no routing row must still honor the console's
+    org-default (an "org default" that skipped every team member wasn't a default at all). No key
+    at all (operator/anon) → None (pure global routing). Fail-open: any lookup hiccup degrades to
+    None, never a 500 on the auth path."""
+    if auth is None or not (team_id or org_id):
         return None
     try:
-        return await auth.get_routing_policy(key)
+        if team_id:
+            team_policy = await auth.get_routing_policy(team_id)
+            if team_policy is not None:
+                return team_policy  # team overlay wins outright when present
+        return await auth.get_routing_policy(org_id) if org_id else None
     except Exception:
         return None
 
