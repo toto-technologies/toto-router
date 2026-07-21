@@ -62,7 +62,7 @@
   /* footer deep link — whole row is the target (44px min touch height) */
   .wfoot { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-height: 44px;
     padding: 9px 15px; border-top: 1px solid var(--line); color: var(--accent);
-    font-size: 0.71875rem; font-weight: calc(600 + (var(--ui-weight) - 400)); text-decoration: none; }
+    font-size: 0.75rem; font-weight: calc(600 + (var(--ui-weight) - 400)); text-decoration: none; }
   .wfoot:hover { background: var(--panel-hi); }
   .wfoot .arr { transition: transform 0.13s ease; }
   .wfoot:hover .arr { transform: translateX(2px); }

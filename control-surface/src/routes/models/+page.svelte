@@ -536,24 +536,25 @@
   :global(:root[data-theme='dark']) .btn.primary { color: #0e1813; }
   :global(:root[data-theme='light']) .btn.primary { color: #fff; }
 
-  /* ---- section heads — the catalog page's secthead scale, below the 24px page title ---- */
+  /* ---- section heads — the shared secthead scale, below the 24px page title ---- */
   .mhead {
-    margin: 56px 0 18px;
+    margin: var(--gap-section) 0 var(--gap-section-body);
   }
   .mhead h2 {
     margin: 0;
-    font-size: 1.25rem;
+    font-size: 1.1875rem;
+    line-height: 1.2;
     font-weight: calc(680 + (var(--ui-weight) - 400));
-    letter-spacing: -0.015em;
+    letter-spacing: -0.012em;
   }
 
-  /* ---- library controls ---- */
+  /* ---- library controls — the query group; results (count + grid) sit apart below ---- */
   .libbar {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--gap-group);
     flex-wrap: wrap;
-    margin: 0 0 14px;
+    margin: 0 0 var(--gap-block);
   }
   .libsearch {
     flex: 1 1 240px;
@@ -613,13 +614,13 @@
     color: var(--accent);
   }
   .countline {
-    margin: 0 0 14px;
+    margin: 0 0 var(--gap-section-body);
     font-size: 0.75rem;
     color: var(--text-3);
   }
   .countline b { color: var(--text-2); }
   .countline:has(+ .factline) { margin-bottom: 4px; }
-  .factline { margin: 0 0 14px; }
+  .factline { margin: 0 0 var(--gap-section-body); }
   .quiet {
     margin: 0;
     font-size: 0.75rem;
@@ -667,7 +668,7 @@
     color: var(--text);
   }
   .rid {
-    font-size: 0.71875rem;
+    font-size: 0.75rem;
     color: var(--text-3);
     margin-top: 1px;
   }
@@ -792,7 +793,7 @@
   .adv[open] summary { margin-bottom: 10px; }
   .advnote {
     margin: 0 0 10px;
-    font-size: 0.71875rem;
+    font-size: 0.75rem;
     color: var(--text-3);
     line-height: 1.5;
   }
@@ -819,7 +820,7 @@
     background: var(--panel);
     color: var(--text-2);
     border-radius: 6px;
-    font-size: 0.71875rem;
+    font-size: 0.75rem;
     font-weight: calc(600 + (var(--ui-weight) - 400));
     padding: 5px 11px;
     cursor: pointer;

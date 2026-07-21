@@ -82,17 +82,17 @@
 <style>
   .sk-stack { display: flex; flex-direction: column; gap: 10px; }
   .deadend { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding: 4px 2px; }
-  .deadend p { margin: 0; font-size: 0.78125rem; color: var(--text-2); }
+  .deadend p { margin: 0; font-size: 0.8125rem; color: var(--text-2); }
 
   .catsel { appearance: none; background: transparent; border: 0; padding: 0; cursor: pointer;
-    font-size: 0.71875rem; color: var(--text-2); font-family: inherit; }
+    font-size: 0.75rem; color: var(--text-2); font-family: inherit; }
   .catsel:hover { color: var(--text); }
 
   .rows { display: flex; flex-direction: column; gap: 3px; }
   .brow { display: flex; align-items: center; gap: 9px; padding: 5px 6px; border-radius: 8px; min-width: 0; }
   .brow.lead { background: var(--panel-2); }
   .brow.lead .score { color: var(--accent); }
-  .rk { width: 14px; text-align: right; font-size: 0.71875rem; color: var(--text-3); flex: 0 0 auto; }
+  .rk { width: 14px; text-align: right; font-size: 0.75rem; color: var(--text-3); flex: 0 0 auto; }
   /* provider identity tile — the benchmarks page's hue recipe; residency isn't known here,
      so the residency tints (teal/purple) would be a false claim */
   .pmark { width: 24px; height: 24px; border-radius: 7px; flex: 0 0 auto; display: inline-flex;

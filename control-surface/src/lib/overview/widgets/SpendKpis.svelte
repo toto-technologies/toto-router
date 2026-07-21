@@ -149,5 +149,5 @@
   .cheaper { color: var(--good); font-weight: calc(600 + (var(--ui-weight) - 400)); }
 
   .deadend { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding: 4px 2px; }
-  .deadend p { margin: 0; font-size: 0.78125rem; color: var(--text-2); }
+  .deadend p { margin: 0; font-size: 0.8125rem; color: var(--text-2); }
 </style>

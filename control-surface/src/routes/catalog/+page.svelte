@@ -1048,7 +1048,7 @@
   {/if}
 
   <!-- ===== FIREWORKS SYNC ===== -->
-  <div class="secthead" style="margin-top:24px">
+  <div class="secthead">
     <h2>Fireworks sync</h2>
     <span class="hint">
       Models you fine-tune in Fireworks, checked live against this catalog — adopt new ones, catch
@@ -1402,7 +1402,7 @@
   .failwhat { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .failwhat b { font-size: 0.8125rem; font-weight: calc(600 + (var(--ui-weight) - 400)); }
   .taxhead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-  .taxempty { margin-top: 8px; font-size: 0.78125rem; color: var(--muted); }
+  .taxempty { margin-top: 8px; font-size: 0.8125rem; color: var(--muted); }
   .taxrows { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
   .taxrow { display: flex; align-items: center; gap: 8px; }
   .taxrow .taxname { flex: 0 0 140px; }
@@ -1450,21 +1450,20 @@
   }
   .fielderr {
     margin-top: 6px;
-    font-size: 0.71875rem;
+    font-size: 0.75rem;
     color: var(--crit);
   }
   /* Task routing is the core of the page: section title carries page-level weight, rows read
      at body size instead of whispering. */
+  /* the first section sits under the pagehead — its gap rules, no extra top margin */
   .secthead.core {
-    margin: 6px 0 14px;
+    margin: 0 0 var(--gap-section-body);
   }
   .secthead.core h2 {
-    font-size: 1.25rem;
     font-weight: calc(680 + (var(--ui-weight) - 400));
-    letter-spacing: -0.015em;
   }
   .secthead.core .hint {
-    font-size: 0.78125rem;
+    font-size: 0.8125rem;
   }
   :global(.tasktable .tasktype) {
     font-size: 0.8125rem;
@@ -1553,7 +1552,7 @@
     border: 1px solid var(--warn);
     background: var(--warn-soft);
     border-radius: 9px;
-    font-size: 0.78125rem;
+    font-size: 0.8125rem;
   }
   .rmwarn ul {
     margin: 6px 0 0;
@@ -1564,7 +1563,7 @@
   }
   .rmnote {
     margin: 8px 0 0;
-    font-size: 0.78125rem;
+    font-size: 0.8125rem;
     color: var(--text-2);
   }
   .btn.danger {
@@ -1598,7 +1597,7 @@
   }
   .fieldnote {
     margin-top: 6px;
-    font-size: 0.65625rem;
+    font-size: 0.6875rem;
     color: var(--text-3);
   }
 
@@ -1610,7 +1609,7 @@
   }
   .malias {
     font-family: var(--mono);
-    font-size: 0.65625rem;
+    font-size: 0.6875rem;
     color: var(--text-3);
     margin-top: 1px;
     letter-spacing: -0.01em;
@@ -1826,7 +1825,7 @@
   /* ---- Fireworks sync panel ---- */
   .synchint {
     color: var(--text-3);
-    font-size: 0.78125rem;
+    font-size: 0.8125rem;
   }
   .synchint b {
     display: block;
@@ -1848,7 +1847,7 @@
     margin-bottom: 10px;
   }
   .syncfacts {
-    font-size: 0.65625rem;
+    font-size: 0.6875rem;
     color: var(--text-3);
   }
   .syncempty {

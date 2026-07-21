@@ -88,5 +88,5 @@
 
   .sk-stack { display: flex; flex-direction: column; gap: 10px; }
   .deadend { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding: 4px 2px; }
-  .deadend p { margin: 0; font-size: 0.78125rem; color: var(--text-2); }
+  .deadend p { margin: 0; font-size: 0.8125rem; color: var(--text-2); }
 </style>
