@@ -109,6 +109,13 @@ npm run build:oss     # the OSS build — seven tabs, nothing else compiled in
 
 Restart the gateway and open `http://127.0.0.1:8080/console`.
 
+## Documentation
+
+Full documentation lives in [`openwiki/`](openwiki/quickstart.md). Start with the
+[OpenWiki quickstart](openwiki/quickstart.md), then follow its links to the architecture notes
+(routing, caching, the Anthropic surface), the domain notes (catalog & providers, identity & auth,
+trace & metering), operations (configuration, console), and testing.
+
 ## Tests
 
 ```bash
