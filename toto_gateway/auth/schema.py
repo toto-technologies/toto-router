@@ -179,6 +179,29 @@ CREATE TABLE IF NOT EXISTS catalog_adoptions (
   updated_at     REAL NOT NULL,
   PRIMARY KEY (scope_key, id)
 );
+-- Catalog freshness: the last discovery snapshot per (provider, slug), written by the daily
+-- background refresh. PLATFORM-wide (openrouter is keyless, fireworks/cloudflare use the platform
+-- key), so no scope_key. first_seen anchors the New tag and survives restarts, last_seen tracks
+-- presence (a slug whose last_seen is behind its provider max is no longer listed upstream), and
+-- price_in/out (per 1k) drive the price-drift flag against adopted entries. Comments here stay free
+-- of semicolons on purpose, since executescript splits the DDL on that character.
+CREATE TABLE IF NOT EXISTS catalog_snapshots (
+  provider    TEXT NOT NULL,
+  slug        TEXT NOT NULL,
+  price_in    REAL,
+  price_out   REAL,
+  first_seen  REAL NOT NULL,
+  last_seen   REAL NOT NULL,
+  PRIMARY KEY (provider, slug)
+);
+-- Per-provider opt-in auto-adopt toggle (default OFF everywhere -- absence of a row means off).
+-- When on, the daily refresh adopts newly discovered models into the single-tenant scope with an
+-- auto provenance. Comments here stay free of semicolons since executescript splits DDL on them.
+CREATE TABLE IF NOT EXISTS catalog_provider_prefs (
+  provider    TEXT PRIMARY KEY,
+  auto_adopt  INTEGER NOT NULL DEFAULT 0,
+  updated_at  REAL NOT NULL
+);
 -- Manual price overrides, for entries whose provider publishes no machine-readable pricing or
 -- whose YAML price rotted. Prices are stored PER 1K tokens (converted from the console's per-Mtok
 -- input at the API boundary, exact divide by 1000). scope_key is team_id or org_id or the literal

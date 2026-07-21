@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 
 from ..catalog_sync import (
     fetch_anthropic_library,
@@ -30,6 +31,33 @@ from .deps import Identity, require_read_role, require_role
 router = APIRouter(tags=["admin"])
 
 _EMPTY = {"account_models": [], "deployments": [], "catalog_entries": [], "drift": [], "ok": []}
+
+
+async def _enrich_freshness(request: Request, provider: str, models: list[dict]) -> dict:
+    """Tag each discovered model with first_seen + is_new from the stored snapshot (mutates in
+    place) and return the module-level freshness facts for the source tab: new_count, the snapshot's
+    last-checked time, the last refresh error (honest degrade note), and the auto-adopt toggle. A
+    model absent from the snapshot (seen live before the first tick recorded it) gets first_seen
+    null / is_new false until the next refresh."""
+    from ..freshness import is_new
+
+    store = getattr(request.app.state, "auth", None)
+    window = request.app.state.settings.catalog_freshness_new_window_days
+    now = time.time()
+    snap = {r["slug"]: r for r in await store.snapshot_rows(provider)} if store is not None else {}
+    checked_at = max((r["last_seen"] for r in snap.values()), default=None)
+    new_count = 0
+    for m in models:
+        first = (snap.get(m["slug"]) or {}).get("first_seen")
+        m["first_seen"] = first
+        m["is_new"] = is_new(first, now, window) and not m.get("cataloged")
+        if m["is_new"]:
+            new_count += 1
+    fresh = getattr(request.app.state, "catalog_freshness", None) or {}
+    perr = (fresh.get("providers", {}).get(provider) or {}).get("error")
+    auto = await store.get_auto_adopt(provider) if store is not None else False
+    return {"new_count": new_count, "snapshot_checked_at": checked_at,
+            "refresh_error": perr, "auto_adopt": auto}
 
 
 @router.get("/v1/admin/catalog/sync/fireworks")
@@ -58,8 +86,9 @@ async def discover_openrouter(request: Request,
     fetched = await fetch_openrouter(key)
     models = reconcile_openrouter(
         request.app.state.gateway.catalog_for(identity).models, fetched["models"])
+    fresh = await _enrich_freshness(request, "openrouter", models)
     return {"provider": "openrouter", "key_present": bool(key), "checked_at": time.time(),
-            "error": fetched["error"], "total": len(models), "models": models}
+            "error": fetched["error"], "total": len(models), "models": models, **fresh}
 
 
 @router.get("/v1/admin/catalog/discovery/fireworks")
@@ -76,8 +105,9 @@ async def discover_fireworks(request: Request,
     fetched = await fetch_fireworks_library(key)
     models = reconcile_fireworks_library(
         request.app.state.gateway.catalog_for(identity).models, fetched["models"])
+    fresh = await _enrich_freshness(request, "fireworks", models)
     return {**base, "key_present": True, "error": fetched["error"], "total": len(models),
-            "filtered_out": fetched["filtered_out"], "models": models}
+            "filtered_out": fetched["filtered_out"], "models": models, **fresh}
 
 
 @router.get("/v1/admin/catalog/discovery/cloudflare")
@@ -96,8 +126,37 @@ async def discover_cloudflare(request: Request,
     fetched = await fetch_cloudflare_library(token, account)
     models = reconcile_cloudflare_library(
         request.app.state.gateway.catalog_for(identity).models, fetched["models"])
+    fresh = await _enrich_freshness(request, "cloudflare", models)
     return {**base, "key_present": True, "error": fetched["error"], "total": len(models),
-            "filtered_out": fetched["filtered_out"], "models": models}
+            "filtered_out": fetched["filtered_out"], "models": models, **fresh}
+
+
+@router.put("/v1/admin/catalog/freshness/auto-adopt/{provider}")
+async def set_auto_adopt(provider: str, body: dict, request: Request,
+                         identity: Identity = Depends(require_role("admin"))):
+    """Toggle per-provider auto-adopt (opt-in, default off). When on, the daily refresh adopts newly
+    discovered <provider> models into the single-tenant catalog with an auto provenance."""
+    from ..freshness import FRESHNESS_PROVIDERS
+
+    if provider not in FRESHNESS_PROVIDERS:
+        return JSONResponse(status_code=400, content={"error": {
+            "message": f"provider must be one of {FRESHNESS_PROVIDERS}", "type": "invalid_request_error"}})
+    enabled = bool(body.get("enabled"))
+    await request.app.state.auth.set_auto_adopt(provider, enabled)
+    return {"provider": provider, "auto_adopt": enabled}
+
+
+@router.post("/v1/admin/catalog/freshness/refresh")
+async def refresh_freshness_now(request: Request,
+                                identity: Identity = Depends(require_role("admin"))):
+    """"Check now": run a freshness pass immediately (same code path as the scheduled tick), store
+    the result on app.state, and return the per-provider diff. Admin — it fires outbound requests
+    and writes app.state, like the availability probe's POST."""
+    from ..freshness import run_freshness
+
+    window = request.app.state.settings.catalog_freshness_new_window_days
+    request.app.state.catalog_freshness = await run_freshness(request.app, window_days=window)
+    return request.app.state.catalog_freshness
 
 
 @router.get("/v1/admin/catalog/discovery/anthropic")

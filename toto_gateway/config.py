@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     # Freshness and refresh cadence in hours. 0 refresh cadence means explicit refresh only.
     inventory_max_staleness_hours: float = 24.0
     inventory_refresh_hours: float = 0.0
+    # Catalog freshness: a lifespan task snapshots each keyed provider's discovery list every N
+    # hours (jittered, first run delayed one interval) and diffs it — added/removed/re-priced. 0
+    # disables. A discovered model stays tagged "new" for this many days after first_seen.
+    catalog_freshness_refresh_hours: float = 24.0
+    catalog_freshness_new_window_days: float = 14.0
 
     # Trace sinks
     trace_jsonl: str = "traces.jsonl"

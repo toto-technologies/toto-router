@@ -27,6 +27,8 @@
     catMark,
     syncFreshness,
     mergeDiscovery,
+    withFreshnessFlags,
+    firstSeenLabel,
     filterDiscovery,
     DISCOVERY_FILTERS,
     FW_DISCOVERY_FILTERS,
@@ -48,6 +50,8 @@
     getFireworksSync,
     createAdoption,
     deleteAdoption,
+    setAutoAdopt,
+    acceptPrice,
     listAdoptions,
     getOrgRoutingPolicy,
     getTuningDatasets,
@@ -162,6 +166,33 @@
     }
   }
 
+  // ---- Freshness: auto-adopt toggle + accept price drift --------------------------------------
+  const autoAdopt = $derived({
+    openrouter: orQ.data?.auto_adopt ?? false,
+    fireworks: fwQ.data?.auto_adopt ?? false,
+    cloudflare: cfQ.data?.auto_adopt ?? false,
+  });
+  async function toggleAutoAdopt(provider) {
+    try {
+      await setAutoAdopt(provider, !autoAdopt[provider]);
+      reconcile(provider);
+    } catch (e) {
+      notice = `Couldn't change auto-adopt: ${e?.message ?? 'unknown error'}.`;
+    }
+  }
+  async function acceptDrift(m) {
+    const key = adoptionKey(m);
+    busyKeys[key] = true;
+    try {
+      await acceptPrice(m.catalog_id);
+      reconcile(m.source);
+    } catch (e) {
+      notice = `Couldn't accept the new price: ${e?.message ?? 'unknown error'}.`;
+    } finally {
+      delete busyKeys[key];
+    }
+  }
+
   // ---- Library view-model ---------------------------------------------------------------------
   const LIB_CAP = 48;
   let search = $state('');
@@ -178,12 +209,21 @@
   const cfModels = $derived(cfQ.data?.models ?? []);
   const anModels = $derived(anQ.data?.models ?? []);
   const merged = $derived(
-    withAdoptions(
-      mergeDiscovery(orModels, fwModels, cfModels, anModels),
-      adoptQ.data?.adoptions?.map((a) => a.id),
-      overrides
+    withFreshnessFlags(
+      withAdoptions(
+        mergeDiscovery(orModels, fwModels, cfModels, anModels),
+        adoptQ.data?.adoptions?.map((a) => a.id),
+        overrides
+      ),
+      adoptQ.data?.adoptions
     )
   );
+  // new-since-last-refresh counts per source, straight off the discovery response
+  const newCounts = $derived({
+    openrouter: orQ.data?.new_count ?? 0,
+    fireworks: fwQ.data?.new_count ?? 0,
+    cloudflare: cfQ.data?.new_count ?? 0,
+  });
   const pool = $derived(source === 'all' ? merged : merged.filter((m) => m.source === source));
   const filtered = $derived(filterDiscovery(pool, search, filters));
   const shown = $derived(filtered.slice(0, LIB_CAP));
@@ -312,7 +352,7 @@
     <div class="seg" role="tablist" aria-label="Source">
       {#each [['all', 'All sources', null], ['openrouter', 'OpenRouter', orModels.length], ['fireworks', 'Fireworks', fwModels.length], ['cloudflare', 'Cloudflare', cfModels.length], ['anthropic', 'Anthropic', anModels.length]] as [key, label, count] (key)}
         <button class:on={source === key} aria-pressed={source === key} onclick={() => (source = key)}>
-          {label}{#if sourceState[key]}&nbsp;· <span class="st">{sourceState[key].short}</span>{:else if count != null}&nbsp;· {count}{/if}
+          {label}{#if sourceState[key]}&nbsp;· <span class="st">{sourceState[key].short}</span>{:else if count != null}&nbsp;· {count}{/if}{#if newCounts[key]}&nbsp;· <span class="newc">{newCounts[key]} new</span>{/if}
         </button>
       {/each}
     </div>
@@ -325,6 +365,17 @@
   <p class="countline">
     <b>{filtered.length}</b> of {pool.length} models · <b>{catalogedCount}</b> in your catalog
   </p>
+  {#if source !== 'all'}
+    <div class="autoadopt">
+      <label class="aa">
+        <input type="checkbox" checked={autoAdopt[source]} onchange={() => toggleAutoAdopt(source)} />
+        <span>Automatically adopt new {providerLabel(source)} models</span>
+      </label>
+      {#if source === 'openrouter' ? orQ.data?.refresh_error : source === 'fireworks' ? fwQ.data?.refresh_error : cfQ.data?.refresh_error}
+        <span class="aastale">couldn't refresh — showing the last snapshot</span>
+      {/if}
+    </div>
+  {/if}
   {#if factLine}
     <p class="quiet factline">{factLine}</p>
   {/if}
@@ -470,6 +521,15 @@
         {#if selected.source === 'openrouter'}
           <dt>Price</dt><dd>{perM(sm.price_in)} in · {perM(sm.price_out)} out per M tokens</dd>
         {/if}
+        {#if sm.price_drift}
+          <dt>Upstream price</dt>
+          <dd class="drift">changed to {perM(sm.price_drift.new_in)} in · {perM(sm.price_drift.new_out)} out
+            (was {perM(sm.price_drift.old_in)} · {perM(sm.price_drift.old_out)}) — cost estimates keep
+            using your stored price until you accept it.</dd>
+        {/if}
+        {#if sm.upstream_removed}
+          <dt>Upstream</dt><dd class="drift">no longer listed by the provider — still adopted, review whether to keep it.</dd>
+        {/if}
         <dt>Context</dt><dd>{sm.context_window != null ? `${sm.context_window.toLocaleString()} tokens` : '—'}</dd>
         <dt>Routing</dt><dd>bind task types in Task routing once it's in the catalog</dd>
       </dl>
@@ -484,6 +544,15 @@
           </button>
         {:else if sm.adopted}
           <span class="chip good"><span class="d"></span>In your catalog</span>
+          {#if sm.price_drift}
+            <button
+              class="btn small primary"
+              disabled={!!busyKeys[adoptionKey(sm)]}
+              onclick={() => acceptDrift(sm)}
+            >
+              {busyKeys[adoptionKey(sm)] ? 'Accepting…' : 'Accept new price'}
+            </button>
+          {/if}
           <button
             class="btn small"
             disabled={!!busyKeys[adoptionKey(sm)]}
@@ -610,6 +679,11 @@
     color: var(--accent);
   }
   .seg .st { color: var(--warn); }
+  .seg .newc { color: var(--good, #1a7f37); font-weight: 600; }
+  .autoadopt { display: flex; align-items: center; gap: 12px; margin: 0 0 var(--gap-section-body); }
+  .autoadopt .aa { display: inline-flex; align-items: center; gap: 8px; font-size: 0.8125rem; color: var(--text-2); cursor: pointer; }
+  .autoadopt .aastale { font-size: 0.75rem; color: var(--warn); }
+  .drift { color: var(--warn, #b45309); }
   .fchip {
     border: 1px solid var(--line-2);
     background: var(--panel);

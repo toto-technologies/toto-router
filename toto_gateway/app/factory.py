@@ -24,7 +24,8 @@ from ..routes import (
 )
 from .background import (
     _audit_exporter, _backfill_embeddings, _backfill_notes, _benchmark_refresher, _calsync,
-    _dreamer, _inventory_refresher, _memory_watermark, _reaper, _retention_sweeper,
+    _dreamer, _freshness_refresher, _inventory_refresher, _memory_watermark, _reaper,
+    _retention_sweeper,
 )
 from .build import build_driver, build_gateway
 from .http import SpaStaticFiles, _apply_security_headers, _find_build
@@ -124,6 +125,8 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
             bg.append(asyncio.create_task(_benchmark_refresher(app, settings)))
         if settings.inventory_refresh_hours > 0:
             bg.append(asyncio.create_task(_inventory_refresher(app, settings)))
+        if settings.catalog_freshness_refresh_hours > 0:
+            bg.append(asyncio.create_task(_freshness_refresher(app, settings)))
         # App/enterprise background loops. Each rides a module the OSS export drops — note/embedding
         # backfills and the dreamer on the content/recall plane, calendar sync on pipedream/ics,
         # audit export, content retention — so they spawn only outside the oss edition. This branch

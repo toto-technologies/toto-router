@@ -158,6 +158,25 @@ def _view(adoption: dict) -> dict:
             "updated_at": adoption["updated_at"]}
 
 
+async def _enrich_adopted(request: Request, rows: list[dict]) -> None:
+    """Stamp upstream_removed + price_drift on adopted rows (mutates in place), reading each provider's
+    snapshot once. Base/shipped rows (no `adopted` marker) are left untouched — repricing them is a
+    YAML edit, not this flow. No store → no flags (degrades silently)."""
+    from ..freshness import adopted_flags, provider_checked_at
+
+    store = getattr(request.app.state, "auth", None)
+    if store is None:
+        return
+    targets = [r for r in rows if r.get("source") == "adopted" or r.get("adopted")]
+    for provider in {r.get("provider") for r in targets}:
+        snap_rows = await store.snapshot_rows(provider)
+        snap_map = {r["slug"]: r for r in snap_rows}
+        checked = provider_checked_at(snap_rows)
+        for r in (t for t in targets if t.get("provider") == provider):
+            r.update(adopted_flags(r["upstream_model"], r["price_in"], r["price_out"],
+                                   snap_map, checked))
+
+
 async def scope_effective_catalog(request: Request, scope_key: str | None):
     """The catalog DISPATCH resolves for callers in `scope_key` (team_id, or org_id for teamless
     callers): shipped base + that scope's server-side adoptions. THE seam for every admin surface
@@ -203,8 +222,9 @@ async def effective_models(request: Request, org_id: str | None = Query(None),
     catalog = await scope_effective_catalog(request, scope)
     if catalog is None:
         return _error(503, "catalog unavailable", "config_error")
-    return {"scope_key": scope,
-            "models": [_model_row(e) for e in catalog.models]}
+    rows = [_model_row(e) for e in catalog.models]
+    await _enrich_adopted(request, rows)  # upstream_removed / price_drift on adopted picker rows
+    return {"scope_key": scope, "models": rows}
 
 
 @router.get("/v1/admin/catalog/adoptions")
@@ -215,7 +235,9 @@ async def list_adoptions(request: Request,
     scope = _scope_key(identity)
     if scope is None:
         return {"adoptions": []}
-    return {"adoptions": [_view(r) for r in await request.app.state.auth.list_adoptions(scope)]}
+    rows = [_view(r) for r in await request.app.state.auth.list_adoptions(scope)]
+    await _enrich_adopted(request, rows)  # upstream_removed / price_drift per adopted row
+    return {"adoptions": rows}
 
 
 @router.post("/v1/admin/catalog/adoptions")
@@ -292,6 +314,29 @@ async def adopt(body: dict, request: Request,
         pass
 
     return JSONResponse(status_code=201, content={"entry": _view(stored)})  # console reads r.entry.id
+
+
+@router.post("/v1/admin/catalog/adoptions/{id}/accept-price")
+async def accept_price(id: str, request: Request,
+                       identity: Identity = Depends(require_role("admin"))):
+    """Accept the upstream price drift for an adopted model: rewrite its stored price to the latest
+    snapshot price. Until this is called, dispatch + the picker's cost estimates keep using the
+    stored price (never a silent reprice). 404 when the id isn't adopted in this scope; 400 when
+    there's no snapshot price to accept."""
+    scope = _scope_key(identity)
+    adoption = (await request.app.state.auth.get_adoption(scope, id)) if scope else None
+    if adoption is None:
+        return _error(404, "adoption not found", "invalid_request_error", "not_found")
+    snap = next((r for r in await request.app.state.auth.snapshot_rows(adoption["provider"])
+                 if r["slug"] == adoption["upstream_model"]), None)
+    if snap is None or (snap["price_in"] is None and snap["price_out"] is None):
+        return _error(400, "no upstream price to accept", "invalid_request_error", "no_snapshot_price")
+    entry = CatalogEntry.model_validate(adoption["entry"])
+    entry.price_usd_per_1k = Price(prompt=snap["price_in"] or 0.0, completion=snap["price_out"] or 0.0)
+    stored = await request.app.state.auth.add_adoption(
+        scope, id, entry_json=entry.model_dump_json(), upstream_model=adoption["upstream_model"],
+        provider=adoption["provider"], created_by=adoption["created_by"])
+    return {"entry": _view(stored)}
 
 
 @router.post("/v1/admin/catalog/local-models")
