@@ -17,8 +17,12 @@ from __future__ import annotations
 import base64
 import contextvars
 import hashlib
+import json
 import os
+import secrets as _secrets
+import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 
 from .benchmarking.domain import CredentialScopeRef
 
@@ -28,12 +32,21 @@ class Provider:
     label: str
     api_key_env: str  # the env var the platform key lives in (also the runner's lookup key)
     powers: str       # one-line description for the Settings UI
+    # Second, non-secret per-provider field interpolated into base_url (Cloudflare's account id in
+    # .../accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1). Set → the stored row is a JSON blob carrying
+    # both fields (pack_provider_key), and load_byok maps the account id under this env name so
+    # expand_env_refs resolves it from the same overlay the key rides in.
+    account_env: str | None = None
 
 
 # The known BYOK providers — single source of truth (the route and the seam both read this).
 PROVIDERS: dict[str, Provider] = {
     "openrouter": Provider("OpenRouter", "OPENROUTER_API_KEY", "Economy-tier routing via OpenRouter"),
     "fireworks": Provider("Fireworks", "FIREWORKS_API_KEY", "Fireworks serverless inference + fine-tunes"),
+    "cloudflare": Provider("Cloudflare", "CLOUDFLARE_API_TOKEN", "Workers AI models at the edge",
+                           account_env="CLOUDFLARE_ACCOUNT_ID"),
+    "openai": Provider("OpenAI", "OPENAI_API_KEY", "GPT models via the direct OpenAI API"),
+    "gemini": Provider("Gemini", "GEMINI_API_KEY", "Google Gemini via the direct API"),
 }
 
 # Per-request BYOK override: {api_key_env: decrypted_key}. Default empty → the platform-key path
@@ -52,6 +65,47 @@ class ProviderCredentialUnavailable(Exception):
         self.reason = reason
         self.selected = dict(selected or {})
         super().__init__(f"provider credential unavailable for {', '.join(providers)}: {reason}")
+
+
+def pack_provider_key(provider: str, key: str, account_id: str = "") -> str:
+    """The plaintext blob a provider row encrypts: the bare key, or JSON when the provider carries
+    a second non-secret field (account_env) — both fields live and die as one row."""
+    definition = PROVIDERS[provider]
+    if definition.account_env:
+        return json.dumps({"api_key": key, "account_id": account_id})
+    return key
+
+
+def provider_env_map(provider: str, plaintext: str) -> dict[str, str]:
+    """A decrypted provider row → {env_var: value} for the byok_keys overlay. A two-field provider
+    (cloudflare) stores JSON: the token rides under api_key_env and the account id under
+    account_env, so the base_url ${...} interpolation resolves from the same overlay the key does.
+    A bare-string row (a key stored before the second field existed) is still just the token."""
+    definition = PROVIDERS.get(provider)
+    if definition is None:
+        return {}
+    if definition.account_env and plaintext.startswith("{"):
+        try:
+            data = json.loads(plaintext)
+        except ValueError:
+            return {definition.api_key_env: plaintext}
+        out = {definition.api_key_env: str(data.get("api_key") or "")}
+        account = str(data.get("account_id") or "")
+        if account:
+            out[definition.account_env] = account
+        return {env: value for env, value in out.items() if value}
+    return {definition.api_key_env: plaintext}
+
+
+def expand_env_refs(text: str) -> str:
+    """${ENV} interpolation with stored credentials first: the request-scoped byok_keys overlay
+    (e.g. a stored Cloudflare account id) wins over os.environ; anything left falls through to
+    os.path.expandvars. No $ in the text → returned unchanged."""
+    if "$" not in text:
+        return text
+    for env, value in byok_keys.get().items():
+        text = text.replace("${" + env + "}", value)
+    return os.path.expandvars(text)
 
 
 def last4(key: str) -> str:
@@ -246,11 +300,55 @@ async def load_byok(settings, store, user_id: str | None,
         byok_unavailable_envs.set(frozenset(
             PROVIDERS[provider].api_key_env for provider in error.providers))
     byok_keys.set({
-        PROVIDERS[provider].api_key_env: credential
+        env: value
         for provider, (credential, scope) in selected.items()
         if scope.kind != "platform"
+        for env, value in provider_env_map(provider, credential).items()
     })
     return {provider: scope for provider, (_, scope) in selected.items()}
+
+
+# --- OSS zero-config boot helpers (single-tenant, SQLite-file deploys) ---------------------------
+
+def bootstrap_local_secret(settings) -> str:
+    """Zero-config at-rest secret for the open edition: generate once, persist next to the SQLite
+    DB (mode 0600), reuse forever — so pasting a key in Settings works without any env var. Only
+    when no TOTO_GW_CREDENTIALS_SECRET is set and the DB is a real file; a :memory:/Postgres
+    deploy keeps the explicit-secret requirement (fail closed). TRADEOFF, stated plainly: the
+    secret sits on the same disk as the DB, so it defends a leaked DB file or backup — not a fully
+    compromised host. Set TOTO_GW_CREDENTIALS_SECRET (or the Vault KMS provider) to separate them."""
+    if not settings.db or settings.db == ":memory:" or settings.database_url:
+        return ""
+    path = Path(settings.db).resolve().parent / "credentials.secret"
+    try:
+        if path.is_file():
+            existing = path.read_text().strip()
+            if existing:
+                return existing
+        path.parent.mkdir(parents=True, exist_ok=True)
+        secret = _secrets.token_urlsafe(32)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(secret)
+        return secret
+    except OSError:
+        return ""  # unreadable/unwritable → storage stays unconfigured; writes 503 loudly
+
+
+def stored_org_key_providers(settings, org_id: str) -> set[str]:
+    """Boot-time synchronous peek at org_provider_keys — which providers have a stored key BEFORE
+    the async stores exist. Drives the default-catalog pick, so an OpenRouter key pasted in
+    Settings lights up catalog.openrouter.yaml on the next boot. SQLite-file deploys only (a
+    Postgres deploy configures env vars); first boot / any error → empty set (default stands)."""
+    if not settings.db or settings.db == ":memory:" or settings.database_url:
+        return set()
+    try:
+        with sqlite3.connect(settings.db) as db:
+            rows = db.execute(
+                "SELECT provider FROM org_provider_keys WHERE org_id = ?", (org_id,)).fetchall()
+        return {row[0] for row in rows}
+    except sqlite3.Error:
+        return set()
 
 
 # --- Provision-on-signup: the per-user Toto app key lives in the SAME encrypted vault ------------
