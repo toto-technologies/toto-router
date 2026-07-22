@@ -18,6 +18,47 @@
   // false = the operator pinned TOTO_GW_CATALOG, so adding a provider means editing that env var.
   const catalogDefaulted = $derived(keys.data?.catalog_defaulted ?? true);
 
+  // Per-provider key recipes — where to create the key, what scope it needs, what it usually
+  // looks like. URLs and shapes verified against provider docs 2026-07-21; shapes are hints
+  // ("usually"), never enforced — providers change formats. Fireworks publishes no key shape.
+  const GUIDES = {
+    openrouter: {
+      url: 'https://openrouter.ai/keys',
+      steps: ['Create Key — it’s shown once, copy it right away.'],
+      shape: 'sk-or-v1-…',
+    },
+    fireworks: {
+      url: 'https://app.fireworks.ai/settings/users/api-keys',
+      steps: ['Account settings → API Keys → Create API key — shown once.'],
+      shape: null,
+    },
+    cloudflare: {
+      url: 'https://dash.cloudflare.com/profile/api-tokens',
+      steps: [
+        'Create Token → use the “Workers AI” template → Account Resources: Include your account.',
+        'Account ID: the 32-character code in your dashboard URL after you pick your account (dash.cloudflare.com/<account-id>) — not your email.',
+      ],
+      shape: 'a 40-character code',
+    },
+    openai: {
+      url: 'https://platform.openai.com/api-keys',
+      steps: ['Create new secret key — shown once.'],
+      shape: 'sk-proj-…',
+    },
+    gemini: {
+      url: 'https://aistudio.google.com/apikey',
+      steps: ['Google AI Studio → Create API key (uses your Google account).'],
+      shape: 'AIza…',
+    },
+    anthropic: {
+      url: 'https://console.anthropic.com/settings/keys',
+      steps: ['Console → API keys → Create Key — shown once.'],
+      shape: 'sk-ant-…',
+    },
+  };
+
+  const CF_ACCOUNT_ID = /^[0-9a-f]{32}$/i;
+
   let editing = $state('');       // provider slug whose paste field is open ('' = none)
   let keyDraft = $state('');
   let accountDraft = $state('');
@@ -25,6 +66,13 @@
   let saveError = $state('');
   let saveNote = $state('');      // transient success line after a save recomposes the catalog
   let confirmRemove = $state(''); // provider slug armed for the confirming second Remove click
+
+  // Soft warning only — a key containing @ or whitespace is almost certainly a paste mistake,
+  // but prefixes are never hard-enforced (providers change formats).
+  const keyLooksWrong = $derived(/[@\s]/.test(keyDraft.trim()));
+  // Hard rule (mirrored server-side): a Cloudflare account id is exactly 32 hex chars.
+  const accountInvalid = $derived(
+    accountDraft.trim() !== '' && !CF_ACCOUNT_ID.test(accountDraft.trim()));
 
   function openEdit(row) {
     editing = row.provider;
@@ -48,6 +96,11 @@
     if (!key || saving) return;
     if (row.account_env && !account) {
       saveError = 'Both the API token and the account ID are needed.';
+      return;
+    }
+    if (row.account_env && !CF_ACCOUNT_ID.test(account)) {
+      saveError = 'That doesn’t look like a Cloudflare account ID — it’s the 32-character code '
+        + 'in your dashboard URL (dash.cloudflare.com/<account-id>), not your email.';
       return;
     }
     saving = true;
@@ -127,6 +180,19 @@
             </div>
           </div>
 
+          {#if GUIDES[row.provider]}
+            {@const g = GUIDES[row.provider]}
+            <details class="pcguide">
+              <summary>How to get this key</summary>
+              <ol>
+                <li>Create it at <a href={g.url} target="_blank" rel="noreferrer noopener"
+                    class="mono">{g.url.replace('https://', '')}</a></li>
+                {#each g.steps as step}<li>{step}</li>{/each}
+                {#if g.shape}<li>It usually looks like <code class="mono">{g.shape}</code></li>{/if}
+              </ol>
+            </details>
+          {/if}
+
           {#if editing === row.provider}
             <div class="pcedit">
               {#if row.source === 'environment'}
@@ -145,6 +211,10 @@
                     placeholder={row.account_env ? 'Paste your API token' : 'Paste your API key'}
                     onkeydown={(e) => e.key === 'Enter' && save(row)}
                   />
+                  {#if keyLooksWrong}
+                    <p class="fieldwarn">This looks like an email address or contains spaces —
+                      API keys usually don't.</p>
+                  {/if}
                 </div>
                 {#if row.account_env}
                   <div class="field">
@@ -152,10 +222,16 @@
                     <input
                       id="pk-acct-{row.provider}"
                       autocomplete="off"
+                      class:invalid={accountInvalid}
                       bind:value={accountDraft}
-                      placeholder="Your Cloudflare account ID"
+                      placeholder="32-character code, e.g. c8c30db3…"
                       onkeydown={(e) => e.key === 'Enter' && save(row)}
                     />
+                    {#if accountInvalid}
+                      <p class="fieldwarn">A Cloudflare account ID is exactly 32 characters
+                        (0-9, a-f) — find it in your dashboard URL:
+                        dash.cloudflare.com/&lt;account-id&gt;.</p>
+                    {/if}
                   </div>
                 {/if}
                 <div class="pceditbtns">
@@ -195,6 +271,24 @@
     flex-shrink: 0;
   }
   .pchint { color: var(--muted); font-size: 13px; }
+  .pcguide { margin-top: 4px; }
+  .pcguide summary {
+    color: var(--muted);
+    font-size: 12.5px;
+    cursor: pointer;
+    width: fit-content;
+  }
+  .pcguide summary:hover { color: inherit; }
+  .pcguide ol {
+    margin: 6px 0 2px;
+    padding-left: 22px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .pcguide li { margin: 2px 0; }
+  .pcguide a { color: inherit; }
+  .fieldwarn { margin: 4px 0 0; font-size: 12px; color: var(--warn, #9a6700); }
+  .pcfields input.invalid { border-color: var(--warn, #9a6700); }
   .envnote { color: var(--muted); font-size: 13px; }
   .envnote code { font-size: 12px; }
   .notew.ok { color: var(--good, #1a7f37); }

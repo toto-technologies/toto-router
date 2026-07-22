@@ -80,6 +80,26 @@ def test_route_validation():
         assert "account_id" in r.json()["error"]["message"]
 
 
+def test_cloudflare_account_id_must_be_32_hex():
+    """The mistake that burns real tokens: an email or truncated id stores fine, then every
+    request 404s against a nonexistent account. Hard-reject with a pointer at the dashboard URL."""
+    with TestClient(create_app(settings=_settings())) as client:
+        def put(account_id):
+            return client.put("/v1/admin/provider-keys/cloudflare",
+                              json={"key": "cf-token-value-1", "account_id": account_id})
+
+        for bad in ("Alex@toto.tech",                       # the literal mistake
+                    "c8c30db3dddc4ad31065d336368c790",      # 31 chars
+                    "c8c30db3dddc4ad31065d336368c7905a",    # 33 chars
+                    "g8c30db3dddc4ad31065d336368c7905"):    # non-hex char
+            r = put(bad)
+            assert r.status_code == 400, bad
+            assert "dash.cloudflare.com" in r.json()["error"]["message"]
+
+        assert put("c8c30db3dddc4ad31065d336368c7905").status_code == 200  # lowercase hex
+        assert put("C8C30DB3DDDC4AD31065D336368C7905").status_code == 200  # uppercase hex
+
+
 def test_route_no_secret_fails_closed():
     with TestClient(create_app(settings=_settings(credentials_secret=""))) as client:
         r = client.put("/v1/admin/provider-keys/openrouter", json={"key": "sk-or-abcdef"})
@@ -148,14 +168,14 @@ def test_cloudflare_token_and_account_resolve_together(monkeypatch):
     monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "env-account-stale")
     with TestClient(create_app(settings=_settings())) as client:
         r = client.put("/v1/admin/provider-keys/cloudflare",
-                       json={"key": "cf-token-SECRET77", "account_id": "acct-12345"})
+                       json={"key": "cf-token-SECRET77", "account_id": "c8c30db3dddc4ad31065d336368c7905"})
         assert r.status_code == 200, r.text
         assert r.json()["masked"] == "ET77"
         assert "cf-token-SECRET77" not in r.text  # token never echoed
 
         byok = _spy_chat(client)
         assert byok["CLOUDFLARE_API_TOKEN"] == "cf-token-SECRET77"
-        assert byok["CLOUDFLARE_ACCOUNT_ID"] == "acct-12345"
+        assert byok["CLOUDFLARE_ACCOUNT_ID"] == "c8c30db3dddc4ad31065d336368c7905"
 
 
 def test_cloudflare_base_url_interpolates_stored_account_over_env(monkeypatch):
