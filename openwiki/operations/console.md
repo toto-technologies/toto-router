@@ -47,8 +47,21 @@ capability it exposes is also reachable directly over the API.
 
 ## What each tab configures
 
-- **Settings → provider keys** — paste an OpenRouter / Fireworks / Cloudflare / OpenAI / Gemini key;
-  it is encrypted at rest and used on the next request. See
+- **Settings → provider keys** — paste an OpenRouter / Fireworks / Cloudflare / OpenAI / Gemini /
+  Anthropic key; it is encrypted at rest and used on the next request. Each row carries a
+  collapsed "How to get this key" recipe; the acquisition facts (verified 2026-07-21):
+
+  | Provider | Where to create it | Fields | Permission / scope |
+  |----------|--------------------|--------|--------------------|
+  | OpenRouter | openrouter.ai/keys | API key (`sk-or-v1-…`) | default |
+  | Fireworks | app.fireworks.ai/settings/users/api-keys | API key | default |
+  | Cloudflare | dash.cloudflare.com/profile/api-tokens | API token (40 chars) + **account ID: the 32-hex code in the dashboard URL**, `dash.cloudflare.com/<account-id>` | **"Workers AI" token template**, Account Resources: include your account |
+  | OpenAI | platform.openai.com/api-keys | API key (`sk-proj-…`) | default |
+  | Gemini | aistudio.google.com/apikey | API key (`AIza…`) | default |
+  | Anthropic | console.anthropic.com/settings/keys | API key (`sk-ant-…`) | default |
+
+  The Cloudflare account ID is hard-validated (exactly 32 hex chars, client + server) because a
+  wrong id stores fine and then every request 404s; key fields get soft shape warnings only. See
   [catalog-and-providers](../domain/catalog-and-providers.md#bring-your-own-key-byok-provider-keys).
 - **Settings → routing** — bind task types to models; the binding governs the operator's own traffic
   live (it is stored under the `local` scope). See [routing](../architecture/routing.md#configuring-routing-open-edition).

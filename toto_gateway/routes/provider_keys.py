@@ -16,6 +16,7 @@ shell's job), but a stored key may be PUT over one and wins at dispatch.
 from __future__ import annotations
 
 import os
+import re
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -112,8 +113,15 @@ async def put_provider_key(provider: str, body: KeyBody, request: Request,
     account_id = body.account_id.strip()
     if definition.account_env and not account_id:
         return _error(400, f"{provider} needs an account_id as well", "invalid_request_error")
-    if len(account_id) > 256:
-        return _error(400, "account_id too long", "invalid_request_error")
+    # A Cloudflare account id is exactly 32 hex chars (the code in the dashboard URL). Hard
+    # validation because the failure mode is brutal: a wrong id stores fine, then every request
+    # 404s against a nonexistent account and the operator burns tokens debugging the key instead.
+    if definition.account_env and not re.fullmatch(r"[0-9a-fA-F]{32}", account_id):
+        return _error(
+            400,
+            "account_id must be the 32-character code from your Cloudflare dashboard URL "
+            "(dash.cloudflare.com/<account-id>) — not an email or account name",
+            "invalid_request_error")
     secret = credentials_secret(request.app.state.settings)
     if not secret:  # fail closed — never store plaintext
         return _error(503, "credential storage not configured", "config_error")
